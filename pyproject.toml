@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=61.0", "setuptools_scm", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "calinet"
+dynamic = ["version"]
+description = "CALINET2: A collaborative network to implement a calibration experiment for fear conditioning across multiple laboratories."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Sourav Kulkarni", email = "srvklkrn@gmail.com" },
+  { name = "Jurjen Heij", email = "jurjen.heij@uni-bonn.de" },
+  { name = "Dominik Bach", email = "dbach@uni-bonn.de" }
+]
+maintainers = [
+  { name = "Jurjen Heij", email = "jurjen.heij@uni-bonn.de" },
+  { name = "Dominik Bach", email = "dbach@uni-bonn.de" }
+]
+keywords = ["eda", "fear conditioning", "dynamically distributed database", "calibration"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Topic :: Scientific/Engineering",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "pandas",
+    "numpy",
+    "scipy",
+    "seaborn",
+    "ipython",
+    "ipykernel",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "black", "flake8"]
+
+[tool.setuptools_scm]
+write_to = "calinet/version.py"
+
+[tool.setuptools.packages.find]
+include = ["calinet*"]
+
+[tool.setuptools.package-data]
+calinet = ["version.py"]
+
+[tool.setuptools.data-files]
+"bin" = ["scripts/*"]
