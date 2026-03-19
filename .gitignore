@@ -1,0 +1,9 @@
+# Ignore egg files and directories
+*.egg
+*.egg-info/
+calinet/__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+calinet/version.py
+build/*

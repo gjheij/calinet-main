@@ -1,0 +1,56 @@
+Data,Parameter,Bielefeld
+Screen,Screen Model,"21.5"" Dell E2216H"
+Screen,Screen Size,"(476, 268) mm"
+Screen,Screen Resolution,1920x1080 px
+Screen,Screen Refresh Rate,56-76 Hz
+EDA,Channel number in data file,1
+EDA,Modality Name,EDA
+EDA,units,microsiemens
+EDA,Sampling Rate,1000
+EDA,Manufacturer,Biopac Systems
+EDA,Manufacturer Model,MP160CE
+EDA,Manufacturer Device Serial Number,1703A-001AEF
+EDA,EDA coupler voltage,
+EDA,EDA coupler type,
+EDA,EDA Software Version,
+EDA,Placement,
+ECG,Channel number in data file,
+ECG,Modality Name,
+ECG,units,
+ECG,Sampling Rate,
+ECG,Manufacturer,
+ECG,Manufacturer Model,
+ECG,Manufacturer Device Serial Number,
+ECG,Software Version,
+ECG,Placement,
+PPG,Channel number in data file,
+PPG,Modality Name,
+PPG,units,
+PPG,Sampling Rate,
+PPG,Manufacturer,
+PPG,Manufacturer Model,
+PPG,Manufacturer Device Serial Number,
+PPG,Sensor Type,
+PPG,Software Version,
+PPG,Placement,
+Eye,Eyetracker Sampling Rate,
+Eye,Eyetracker Manufacturer,
+Eye,Eyetracker Manufacturer Model,
+Eye,Eyetracker Manufacturer Device Serial Number,
+Eye,Eyetracker Software Version,
+Eye,Pupil Measurement Type,
+Eye,"Eyetracker Eye-Screen Distance (X, Y, Z)",
+Eye,"Eyetracker Eye-Camera Distance (X, Y, Z)",
+US,US electrode location,forearm
+US,US electrode type,surface bar electrodes consisting of two stainless steel disks of 9 mm diameter and 30 mm spacing
+US,US stimulator,"BIOPAC Systems, STM200-1 "
+RESP,Channel number in data file,
+RESP,Modality Name,
+RESP,units,
+RESP,Sampling Rate,
+RESP,Manufacturer,
+RESP,Manufacturer Model,
+RESP,Manufacturer Device Serial Number,
+RESP,Software Version,
+RESP,Placement,
+RESP,Sensor Type,

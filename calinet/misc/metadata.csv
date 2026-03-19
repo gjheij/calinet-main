@@ -1,0 +1,56 @@
+Data,Parameter,Wuerzburg,Bonn,Stockholm,New York,Reading,Southampton,Bologna,Leuven,London,Bielefeld,Austin
+Screen,Screen Model,"24"" Asus VG248QE","21.5"" Dell E2216H","24"" GN246HL","21.5"" Dell E2216H","22"" Iiyama ProLite B2206WS","22"" Iiyama Prolite B2280HS","22"" Samsung S22B350H",19'' Dell P1911, HP 309E,"21.5"" Dell E2216H","24"" Dell U2417H"
+Screen,Screen Size,"(569.4, 499.9) mm","(476, 268) mm","(565, 342.7) mm","(476, 268) mm","(473.8, 296.1) mm","(476.64, 268.11) mm","(478, 268) mm","(408.24, 255.15) mm","(530, 300) mm","(476, 268) mm","(527.04, 296.46) mm"
+Screen,Screen Resolution,1920x1080 px,1920x1080 px,1920x1080 px,1920x1080 px,1680x1050 px,1920x1080 px,1920x1080 px,1440x900 px,1920x1080 px,1920x1080 px,1920x1080 px
+Screen,Screen Refresh Rate,144 Hz,56-76 Hz,60 Hz,56-76 Hz,59 Hz,60 Hz,60 Hz,60 Hz,1920x1080 px,56-76 Hz,60 Hz
+EDA,Channel number in data file,1,1,1,1,1,1,1,1,1,1,3
+EDA,Modality Name,EDA,EDA,EDA,EDA,EDA,EDA,EDA,EDA,EDA,EDA,EDA
+EDA,units,microsiemens,microsiemens,microsiemens,microsiemens,microsiemens,microsiemens,microsiemens,microsiemens,microsiemens,microsiemens,microsiemens
+EDA,Sampling Rate,1000,2000,2000,2000,1000,1000,1000,2000,1000,1000,200
+EDA,Manufacturer,Biopac Systems,Biopac Systems,Biopac Systems,Biopac Systems,ADInstruments,Biopac Systems,Biopac Systems,Biopac Systems MP160,Custom-built (Cambridge Electronic Design),Biopac Systems,Biopac Systems
+EDA,Manufacturer Model,EDA100C/MEC100C,MP160CE,EDA100C,MP160CE,Powerlab 26T,EDA100C,EDA100C,EDA100D,,MP160CE,MP160CE
+EDA,Manufacturer Device Serial Number,1711001172,1709a-0001C1F,B96041697,1709a-0001C1F,,2206A-00026AB,1703C0002627,2106000253,,1703A-001AEF,1703A-001AEF
+EDA,EDA coupler voltage,0.5V,,0.5V,,"constant voltage excitation (22 mVrms, 75 Hz AC)",,,,,0.5V,
+EDA,EDA coupler type,Constant Voltage DC,,Constant Voltage DC,,GSRAmp (serial number FE116-1288 ),,,,Differential amplifier with fibre optic pulse output,Constant Voltage DC,Solid Gel Electrodes
+EDA,EDA Software Version,Biopac AcqKnowledge 5.0.2,Biopac AcqKnowledge 5.0.1,Biopac AcqKnowledge 3.9.1,Biopac AcqKnowledge 5.0.1,LabChart 8.1.3,Biopac AcqKnowledge 5.0.2,Biopac AcqKnowledge 3.9.0,Biopac AcqKnowledge 5.0.2,Spike2 v2,Biopac AcqKnowledge 5.0.2,Biopac AcqKnowledge 5.0.2
+EDA,Placement,thenar and hypothenar eminences of the palmar surface,right forearm,thenar/hypothenar,right forearm,index and middle finger tips of the left hand,left index and middle distal phalanges,distal phalanges of the second and third finger,left thenar and hypothenar eminences of the palmar surface (see image),thenar and hypothenar eminences of the palmar surface,thenar and hypothenar eminences of the palmar surface,"Left palm, on side of hand furthest away from thumb"
+ECG,Channel number in data file,2,2,2,,2,,2,7,,,
+ECG,Modality Name,ECG,ECG,ECG,,ECG,,ECG,ECG,,,
+ECG,units,mV,mV,mV,,mV,,mV,mV,,,
+ECG,Sampling Rate,1000,2000,1000,,1000,,1000,2000,,,
+ECG,Manufacturer,Biopac Systems,Biopac Systems,Biopac Systems,,ADInstruments,,Biopac Systems,Biopac Systems MP160,,,
+ECG,Manufacturer Model,ECG100C,ECG100C,ECG100C,,Powerlab 26T,,ECG100C,ECG100D,,,
+ECG,Manufacturer Device Serial Number,1711008598,1711008598,B96041697,,Finger Pulse Transducer (piezo-electric),,1701C0005083,2108000298,,,
+ECG,Software Version,Biopac AcqKnowledge 5.0.2,Biopac AcqKnowledge 5.0.2,Biopac AcqKnowledge 3.9.1,,LabChart 8.1.3,,Biopac AcqKnowledge 3.9.0,Biopac AcqKnowledge 5.0.2,,,
+ECG,Placement,"underneath the right clavicle, as well as the left and right costal margin","underneath the right clavicle, as well as the left and right costal margin","RA, LA, aVF",,Ring finger,,"underneath the left clavicle, as well as the left and right costal margin","underneath the left clavicle, left mid-clavicular line below the breast, and below right ribs (see image)",,,
+PPG,Channel number in data file,3,,,,,,,,3,,
+PPG,Modality Name,PPG,,,,3,,,,PPG,,
+PPG,units,V,,,,Stimulation,,,,V,,
+PPG,Sampling Rate,"1,000",,,,mV,,,,"1,000",,
+PPG,Manufacturer,Biopac Systems,,,,"1,000",,,,Nonin,,
+PPG,Manufacturer Model,PPG100C,,,,ADInstruments,,,,Nonin 8600FO Pulse Oximeter,,
+PPG,Manufacturer Device Serial Number,,,,,Powerlab 26T,,,,128400088,,
+PPG,Sensor Type,Optoelectronic Sensor,,,,,,,,Optoelectronic Sensor,,
+PPG,Software Version,Biopac AcqKnowledge 5.0.2,,,,LabChart 8.1.3,,,,Spike2 v2,,
+PPG,Placement,Index and Middlefinger,,,,see below for US set-up,,,,Index,,
+Eye,Eyetracker Sampling Rate,"1,000",1000,250,,"1,000",,,,1000,,
+Eye,Eyetracker Manufacturer,SR-Research,SR-Research,SMI iView Red250mobile 250 Hz,,SR-Research,,,,SR-Research,,
+Eye,Eyetracker Manufacturer Model,EyeLink 1000,EyeLink 1000,SMI,,EyeLink 1000,,,,EyeLink 1000,,
+Eye,Eyetracker Manufacturer Device Serial Number,,,,,,,,,Serial10256,,
+Eye,Eyetracker Software Version,EyeLink 1000 Plus 5.15,EyeLink 1000 Plus 5.15,iView X Version: 4.4.0.0,,EyeLink 1000 Plus 5.15,,,,EyeLink 1000 ,,
+Eye,Pupil Measurement Type,Area,Area,Diameter,,Area,,,,Area,,
+Eye,"Eyetracker Eye-Screen Distance (X, Y, Z)","(0, 0, 500) mm","(0, 0, 500) mm","(0, 0, 700) mm",,"(0, 0, 500) mm",,,,"(0, 0, 348) mm",,
+Eye,"Eyetracker Eye-Camera Distance (X, Y, Z)","(0, 0, 550) mm","(0, 0, 550) mm","(0, 0, 700) mm",,"(0, 0, 550) mm",,,,"(0, 0, 398) mm",,
+US,US electrode location,forearm,forearm,forearm,forearm,right wrist,left write,wrist (median nerve),right inner wrist (see image),forearm,forearm,
+US,US electrode type,surface bar electrodes consisting of two stainless steel disks of 9 mm diameter and 30 mm spacing,surface bar electrodes consisting of two stainless steel disks of 9 mm diameter and 30 mm spacing,surface bar electrodes consisting of two stainless steel disks of 9 mm diameter and 20 mm spacing,EL503,Stimulating bar electrode,biopotenial (EL503 from biopac),Disposable Pre-Gelled Surface Electrodes (15mm x 20mm),Stimulating bar electrode (two 8mm stainless steel electrodes with right inner wrist (see image),WASP,surface bar electrodes consisting of two stainless steel disks of 9 mm diameter and 30 mm spacing,
+US,US stimulator,"Digitimer 7A (Welwyn Garden City, UK)","Digitimer 7A (Welwyn Garden City, UK)",EL350,"BIOPAC Systems, STM200-1 ",Inbuilt Isolated Stimulator in the 26T,"BIOPAC Systems, STM200-1 ","Digitimer DS7A, Digitimer, Welwyn Garden City, UK","Digitimer DS7A, Digitimer, Welwyn Garden City, UK","Digitimer DS7A, Digitimer, Welwyn Garden City, UK, serial number:  DS7A-1008-2006-M383","BIOPAC Systems, STM200-1 ",
+RESP,Channel number in data file,,3,,,,,,,3,,
+RESP,Modality Name,,RESP,,,,,,,RESP,,
+RESP,units,,mV,,,,,,,mV,,
+RESP,Sampling Rate,,2000,,,,,,,2000,,
+RESP,Manufacturer,,Biopac Systems,,,,FIL,,,,,
+RESP,Manufacturer Model,,ECG100C,,,,Breathing Belt Transducer  (acquired using CED 1401 microcontroller),,,,,
+RESP,Manufacturer Device Serial Number,,1711008598,,,,,,,,,
+RESP,Software Version,,Biopac AcqKnowledge 5.0.2,,,,,,,Spike2 v2,,
+RESP,Placement,,Chest,,,,,,,Thorax,,
+RESP,Sensor Type,,Belt,,,,,,,Belt,,
