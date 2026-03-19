@@ -6,15 +6,16 @@ import os
 import pandas as pd
 from calinet.imports import biopac
 from calinet.config import available_labs
-from calinet.utils import append_acq_date_to_df
-from calinet.core.pheno import (
+from calinet.core.pheno import pad_missing_columns
+
+from calinet.utils import (
     rename_col,
     common_write_tsv,
-    pad_missing_columns,
+    append_acq_date_to_df,
     convert_questionnaire_columns_to_int,
 )
 
-from typing import Any, Optional, Tuple, List, Dict
+from typing import Any, Optional, Tuple
 
 import logging
 logger = logging.getLogger(__name__)

@@ -7,18 +7,16 @@ import os
 import pandas as pd
 from calinet.imports import biopac
 from calinet.config import available_labs
+from calinet.core.pheno import pad_missing_columns
+
 from calinet.utils import (
+    rename_col,
     map_handedness,
+    common_write_tsv,
     _read_file_lines,
     extract_subject_id,
     append_acq_date_to_df,
     _normalize_question_text,
-)
-
-from calinet.core.pheno import (
-    rename_col,
-    common_write_tsv,
-    pad_missing_columns,
     convert_questionnaire_columns_to_int,
 )
 

@@ -8,7 +8,7 @@ import shutil
 import pandas as pd
 
 from calinet.core.io import save_json
-from calinet.core.pheno import common_write_tsv
+from calinet.utils import common_write_tsv
 from calinet.config import available_labs
 
 from typing import Dict, Tuple, List, Any

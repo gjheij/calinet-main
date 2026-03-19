@@ -13,9 +13,7 @@ from pathlib import Path
 from typing import Tuple, Dict
 from datetime import datetime
 
-from calinet.core.events import find_events_file_csv
-
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
 import logging
 logger = logging.getLogger(__name__)
@@ -25,6 +23,328 @@ TS_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\]")
 SUBJECT_RE = re.compile(
     r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\]\s+\[(.*?)\]\s+\[[A-Z]+\]\s+"
 )
+
+
+def find_events_file_xlsx(
+        raw_path: str,
+        file_key: str
+    ) -> Optional[str]:
+    """
+    Recursively search for an events Excel file matching a key and return the first match.
+
+    This function walks the directory tree under ``raw_path`` and identifies the first
+    ``.xlsx`` file whose filename contains both the provided ``file_key`` and the
+    substring ``"events"`` (case-insensitive). The search stops at the first match.
+
+    Parameters
+    ----------
+    raw_path : str
+        Root directory to recursively search for candidate Excel files.
+    file_key : str
+        Substring used to match relevant Excel filenames (case-insensitive).
+
+    Returns
+    -------
+    events_xlsx_file : str or None
+        Path to the first matching Excel file. Returns ``None`` if no matching file
+        is found.
+
+    Notes
+    -----
+    This implementation differs from the Bonn pipeline, where the events file is
+    typically stored at a predefined location and does not require recursive
+    directory traversal or filename-based filtering.
+
+    Only the first matching file is returned, and no validation of file contents
+    is performed.
+    """
+    events_xlsx_file = None
+    for root, _, files in os.walk(raw_path):
+        for filename in files:
+            if (
+                filename.lower().endswith(".xlsx")
+                and file_key in filename.lower()
+                and "events" in filename.lower()
+            ):
+                events_xlsx_file = os.path.join(root, filename)
+                break
+
+    return events_xlsx_file
+
+
+def find_events_file_csv(
+        raw_path: str,
+        file_key: str
+    ) -> Optional[str]:
+    """
+    Recursively search for an events CSV file matching a key and return the largest match.
+
+    This function walks the directory tree under ``raw_path`` and identifies all
+    ``.csv`` files whose filenames contain the provided ``file_key`` (case-insensitive).
+    If multiple matches are found, the largest file (by size on disk) is selected.
+
+    Parameters
+    ----------
+    raw_path : str
+        Root directory to recursively search for candidate CSV files.
+    file_key : str
+        Substring used to match relevant CSV filenames (case-insensitive).
+
+    Returns
+    -------
+    events_csv_file : str or None
+        Path to the selected CSV file. Returns ``None`` if no matching files are found.
+
+    Notes
+    -----
+    This implementation differs from the Bonn pipeline, where the events file
+    location is typically deterministic and does not require recursive search
+    or size-based selection.
+
+    File selection is based on ``os.path.getsize`` to prioritize the most complete
+    or populated CSV when multiple candidates exist.
+
+    Side effects include logging via ``logger.warning`` when no matches are found
+    and ``logger.info`` when matches are identified and selected.
+    """
+    matches = []
+
+    for root, _, files in os.walk(raw_path):
+        for filename in files:
+            if filename.lower().endswith(".csv") and file_key in filename.lower():
+                full_path = os.path.join(root, filename)
+                matches.append(full_path)
+
+    if not matches:
+        logger.warning(f"No CSV files containing '{file_key}' found in {raw_path}")
+        return None
+
+    logger.info(f"Found {len(matches)} matching CSV file(s)")
+
+    # if more matches exist, take largest file
+    if len(matches)>1:
+        events_csv_file = max(matches, key=os.path.getsize)
+        size_mb = os.path.getsize(events_csv_file) / (1024 * 1024)
+        logger.info(f"Selected largest CSV file of {size_mb:.2f} MB")
+
+    events_csv_file = max(matches, key=os.path.getsize)
+    return events_csv_file
+
+
+def common_write_tsv(
+        subset: pd.DataFrame,
+        id_key: str,
+        language: Optional[str]=None,
+        phenotype_dir: Optional[str]=None
+    ) -> pd.DataFrame:
+    """
+    Convert value columns to appropriate numeric types and optionally write a TSV file.
+
+    This function attempts to coerce non-ID columns in a dataframe to numeric
+    types where possible. Integer-like columns are converted to pandas nullable
+    integer type (``Int64``), while other numeric columns remain as floats.
+    Optionally, the processed dataframe is written to a TSV file.
+
+    Parameters
+    ----------
+    subset : pd.DataFrame
+        Dataframe containing participant data, including a ``participant_id`` column
+        and one or more value columns.
+    id_key : str
+        Prefix used for naming the output TSV file.
+    language : str, optional
+        Language suffix appended to the output filename. If ``None``, no suffix is added.
+    phenotype_dir : str, optional
+        Directory where the TSV file will be saved. If ``None``, no file is written.
+
+    Returns
+    -------
+    subset : pd.DataFrame
+        Dataframe with value columns converted to appropriate numeric types.
+
+    Notes
+    -----
+    - Columns are only converted to numeric if at least one valid numeric value exists.
+    - Integer-like columns are stored as pandas nullable integers (``Int64``) to
+      preserve missing values.
+    - Missing values are written as ``"n/a"`` in the TSV file.
+
+    Examples
+    --------
+    >>> df_clean = common_write_tsv(
+    ...     df_subset,
+    ...     id_key="bfi_",
+    ...     language="en",
+    ...     phenotype_dir="/data/phenotypes"
+    ... )
+    >>> df_clean.dtypes
+    """
+
+    subset = subset.copy()
+
+    value_cols = [c for c in subset.columns if c != "participant_id"]
+
+    for col in value_cols:
+        numeric = pd.to_numeric(subset[col], errors="coerce")
+
+        # only treat as numeric if at least one real numeric value exists
+        if numeric.notna().any():
+            non_na = numeric.dropna()
+
+            if (non_na == non_na.round()).all():
+                subset[col] = numeric.astype("Int64")
+            else:
+                subset[col] = numeric
+        # else: leave original column untouched
+
+    if phenotype_dir is not None:
+        os.makedirs(phenotype_dir, exist_ok=True)
+        suffix = "" if language is None else language
+        file_path = os.path.join(phenotype_dir, f"{id_key}{suffix}.tsv")
+        subset.to_csv(file_path, sep="\t", index=False, na_rep="n/a")
+        logger.info(f"Aggregated {id_key.upper()} data saved to: {file_path}")
+
+    return subset
+
+
+def rename_col(
+        col: str,
+        old_key: Optional[str]=None,
+        new_key: Optional[str]=None,
+        strip_leading_zeros: bool=True,
+        zero_pattern: str=r'_(0+)(\d+)\b'
+    ) -> str:
+    """
+    Rename a column string by replacing substrings and normalizing numeric suffixes.
+
+    This function optionally replaces a substring (`old_key`) with another
+    (`new_key`) and removes leading zeros from numeric suffixes using a regular
+    expression pattern. A debug message is logged if the column name changes.
+
+    Parameters
+    ----------
+    col : str
+        Original column name.
+    old_key : str, optional
+        Substring to be replaced in the column name.
+    new_key : str, optional
+        Replacement substring for `old_key`.
+    strip_leading_zeros : bool, default=True
+        Whether to remove leading zeros from numeric suffixes.
+    zero_pattern : str, default=r'_(0+)(\d+)\\b'
+        Regular expression pattern used to identify leading zeros in suffixes.
+
+    Returns
+    -------
+    col : str
+        Transformed column name.
+
+    Notes
+    -----
+    - Leading zeros are removed from patterns like ``_01`` → ``_1``.
+    - Replacement occurs only if both `old_key` and `new_key` are provided
+      and `old_key` is found in the column name.
+    - Logging occurs only when the column name is modified.
+
+    Examples
+    --------
+    >>> rename_col("bfi_01", strip_leading_zeros=True)
+    'bfi_1'
+    >>> rename_col("old_02", old_key="old", new_key="new")
+    'new_2'
+    """
+
+    original = col
+
+    # replace key
+    if old_key and new_key and old_key in col:
+        col = col.replace(old_key, new_key)
+
+    # remove leading zeros
+    if strip_leading_zeros:
+        col = re.sub(zero_pattern, r'_\2', col)
+
+    # log only if something changed
+    if col != original:
+        logger.debug(f"Renamed column: '{original}' → '{col}'")
+
+    return col
+
+    
+def convert_questionnaire_columns_to_int(
+        pheno_df: pd.DataFrame,
+        quest_cols: Union[List[str], str],
+        id_col: str="participant_id",
+    ) -> pd.DataFrame:
+    """
+    Extract questionnaire columns and convert them to nullable integer dtype.
+
+    This function selects questionnaire-related columns from a dataframe based
+    on either an explicit list of column names or a string pattern. The selected
+    columns are coerced to numeric values and converted to pandas nullable
+    integer type (``Int64``). Non-numeric values are converted to missing
+    values (``<NA>``).
+
+    Parameters
+    ----------
+    pheno_df : pd.DataFrame
+        Input dataframe containing participant data and questionnaire columns.
+    quest_cols : list of str or str
+        Either a list of column names to extract or a string pattern used with
+        ``str.contains`` to match column names.
+    id_col : str, default="participant_id"
+        Column name identifying participants. This column is always retained.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        Dataframe containing the participant ID column and selected questionnaire
+        columns converted to ``Int64`` dtype.
+
+    Raises
+    ------
+    ValueError
+        If no columns match the provided `quest_cols` specification.
+    ValueError
+        If all values in the selected questionnaire columns are missing after
+        conversion.
+
+    Notes
+    -----
+    - When `quest_cols` is a string, column selection is performed using
+      ``pheno_df.columns.str.contains``.
+    - Non-numeric values are coerced to ``<NA>`` during conversion.
+    - All selected columns are cast to pandas nullable integer type (``Int64``).
+
+    Examples
+    --------
+    >>> df_int = convert_questionnaire_columns_to_int(
+    ...     pheno_df,
+    ...     quest_cols="bfi_"
+    ... )
+    >>> df_int.dtypes
+    """
+
+    if isinstance(quest_cols, str):
+        cols = pheno_df.columns[pheno_df.columns.str.contains(quest_cols)].tolist()
+    else:
+        cols = [c for c in quest_cols if c in pheno_df.columns]
+
+    if not cols:
+        raise ValueError(f"No questionnaire columns matched pattern: {quest_cols}")
+
+    df = pheno_df[[id_col] + cols].copy()
+
+    df[cols] = (
+        df[cols]
+        .apply(pd.to_numeric, errors="coerce")
+        .astype("Int64")
+    )
+
+    if df[cols].isna().all().all():
+        raise ValueError(f"All questionnaire values missing for columns: {cols}")
+
+    return df
 
 
 def extract_subject(

@@ -117,7 +117,8 @@ def add_subject_legend(
 def _generate_single_qa_plot(
         dataset_name: str,
         subject: str,
-        qa_dir: Union[str, Path]
+        qa_dir: Union[str, Path],
+        **kwargs
     ) -> Tuple[str, str]:
     """
     Generate and save a single QA plot for a subject.
@@ -152,7 +153,8 @@ def _generate_single_qa_plot(
 
     f = plot_modalities_per_subject(
         dataset_name,
-        subject
+        subject,
+        **kwargs
     )
 
     fname = os.path.join(qa_dir, f"{subject}_desc-overview.png")
@@ -215,7 +217,7 @@ def plot_modalities_per_subject(
         lab_name: str,
         subject: str,
         root_path: Union[Path, str]="Z:\\CALINET2\\converted",
-        task_names: List[str]=None,
+        task_names: List[str]=["acquisition", "extinction"],
         **kwargs: Any
     ) -> matplotlib.figure.Figure:
     """

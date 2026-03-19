@@ -8,11 +8,13 @@ import numpy as np
 import pandas as pd
 from calinet.imports import biopac
 from calinet.config import available_labs
-from calinet.utils import find_sub_dirs, extract_subject_id
-from calinet.core.pheno import (
+from calinet.core.pheno import pad_missing_columns
+
+from calinet.utils import (
     rename_col,
+    find_sub_dirs,
     common_write_tsv,
-    pad_missing_columns,
+    extract_subject_id,
     convert_questionnaire_columns_to_int,
 )
 

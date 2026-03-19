@@ -5,130 +5,22 @@
 import os
 import numpy as np
 import pandas as pd
-from typing import List, Tuple, Optional, Union
+from typing import Tuple, Optional, Union
 
+from calinet.core.metadata import build_hed_map
 from calinet.core.shock import (
+    get_blank_task_ratings,
     extract_task_ratings_from_events_df
 )
+
+from calinet import utils
+from calinet.core.io import save_json
 
 from calinet.config import config
 ENIGMA_EVENT_NAMES = config.get("event_names")
 
-from calinet.core.metadata import build_hed_map
-from calinet.core.shock import (
-    get_blank_task_ratings
-)
-
-from calinet.core.io import save_json
-
 import logging
 logger = logging.getLogger(__name__)
-
-
-def find_events_file_csv(
-        raw_path: str,
-        file_key: str
-    ) -> Optional[str]:
-    """
-    Recursively search for an events CSV file matching a key and return the largest match.
-
-    This function walks the directory tree under ``raw_path`` and identifies all
-    ``.csv`` files whose filenames contain the provided ``file_key`` (case-insensitive).
-    If multiple matches are found, the largest file (by size on disk) is selected.
-
-    Parameters
-    ----------
-    raw_path : str
-        Root directory to recursively search for candidate CSV files.
-    file_key : str
-        Substring used to match relevant CSV filenames (case-insensitive).
-
-    Returns
-    -------
-    events_csv_file : str or None
-        Path to the selected CSV file. Returns ``None`` if no matching files are found.
-
-    Notes
-    -----
-    This implementation differs from the Bonn pipeline, where the events file
-    location is typically deterministic and does not require recursive search
-    or size-based selection.
-
-    File selection is based on ``os.path.getsize`` to prioritize the most complete
-    or populated CSV when multiple candidates exist.
-
-    Side effects include logging via ``logger.warning`` when no matches are found
-    and ``logger.info`` when matches are identified and selected.
-    """
-    matches = []
-
-    for root, _, files in os.walk(raw_path):
-        for filename in files:
-            if filename.lower().endswith(".csv") and file_key in filename.lower():
-                full_path = os.path.join(root, filename)
-                matches.append(full_path)
-
-    if not matches:
-        logger.warning(f"No CSV files containing '{file_key}' found in {raw_path}")
-        return None
-
-    logger.info(f"Found {len(matches)} matching CSV file(s)")
-
-    # if more matches exist, take largest file
-    if len(matches)>1:
-        events_csv_file = max(matches, key=os.path.getsize)
-        size_mb = os.path.getsize(events_csv_file) / (1024 * 1024)
-        logger.info(f"Selected largest CSV file of {size_mb:.2f} MB")
-
-    events_csv_file = max(matches, key=os.path.getsize)
-    return events_csv_file
-
-
-def find_events_file_xlsx(
-        raw_path: str,
-        file_key: str
-    ) -> Optional[str]:
-    """
-    Recursively search for an events Excel file matching a key and return the first match.
-
-    This function walks the directory tree under ``raw_path`` and identifies the first
-    ``.xlsx`` file whose filename contains both the provided ``file_key`` and the
-    substring ``"events"`` (case-insensitive). The search stops at the first match.
-
-    Parameters
-    ----------
-    raw_path : str
-        Root directory to recursively search for candidate Excel files.
-    file_key : str
-        Substring used to match relevant Excel filenames (case-insensitive).
-
-    Returns
-    -------
-    events_xlsx_file : str or None
-        Path to the first matching Excel file. Returns ``None`` if no matching file
-        is found.
-
-    Notes
-    -----
-    This implementation differs from the Bonn pipeline, where the events file is
-    typically stored at a predefined location and does not require recursive
-    directory traversal or filename-based filtering.
-
-    Only the first matching file is returned, and no validation of file contents
-    is performed.
-    """
-    events_xlsx_file = None
-    for root, _, files in os.walk(raw_path):
-        for filename in files:
-            if (
-                filename.lower().endswith(".xlsx")
-                and file_key in filename.lower()
-                and "events" in filename.lower()
-            ):
-                events_xlsx_file = os.path.join(root, filename)
-                break
-
-    return events_xlsx_file
 
 
 def parse_events_csv(
@@ -562,7 +454,7 @@ def handle_events(
 
     def _try_parse(task_name: str):
         """Return (ratings_dict, events_df) or (None, None) if nothing parsed."""
-        csv_event_file = find_events_file_csv(raw_path, task_name)
+        csv_event_file = utils.find_events_file_csv(raw_path, task_name)
         if csv_event_file:
             return parse_events_csv(
                 csv_event_file,
@@ -574,7 +466,7 @@ def handle_events(
             f"No Events CSV found for {subject_name}, task-{task_name}. Trying XLSX..."
         )
 
-        xlsx_event_file = find_events_file_xlsx(
+        xlsx_event_file = utils.find_events_file_xlsx(
             raw_path,
             task_name
         )

@@ -4,12 +4,10 @@
 
 import os
 import pandas as pd
+
+from calinet import utils
+import calinet.core.io as cio
 from calinet.templates.common import get_questionnaire_spec
-from calinet.core.io import save_json
-from calinet.core.pheno import (
-    common_write_tsv,
-    convert_questionnaire_columns_to_int
-)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -433,8 +431,8 @@ def write_aggregated_shock_ratings(
 
         # ensure integers
         rating_cols = df.columns[1:]
-        df = convert_questionnaire_columns_to_int(df, rating_cols)
-        df = common_write_tsv(
+        df = utils.convert_questionnaire_columns_to_int(df, rating_cols)
+        df = utils.common_write_tsv(
             df,
             ratings_name,
             language="",
@@ -444,7 +442,7 @@ def write_aggregated_shock_ratings(
         # write sidecar
         json_file_name = f"{ratings_name}.json"
         json_file_path = os.path.join(phenotype_dir, json_file_name)
-        save_json(json_file_path, ratings_json_template)
+        cio.save_json(json_file_path, ratings_json_template)
 
         # compile output
         ddict[ratings_type] = df
