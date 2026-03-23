@@ -101,11 +101,11 @@ If you process EyeLink EDF files, make sure the external conversion workflow use
 The command-line wrapper accepts the following arguments:
 
 ```bash
-python -m calinet.convert \
-    --input-dir /path/to/sourcedata/lab \
-    --output-dir /path/to/converted/lab \
-    --n-workers 4 \
-    --clean \
+python -m calinet.convert `
+    --input-dir /path/to/sourcedata/lab `
+    --output-dir /path/to/converted/lab `
+    --n-workers 4 `
+    --clean `
     --debug
 ```
 
@@ -774,30 +774,30 @@ At the same time, some parts of the code are intentionally tolerant:
 ## Minimal serial conversion
 
 ```bash
-python -m calinet.convert \
-    --input-dir Z:\CALINET2\sourcedata\austin\
-    --output-dir Z:\CALINET2\converted\austin
+python -m calinet.convert `
+  --input-dir Z:\CALINET2\sourcedata\austin `
+  --output-dir Z:\CALINET2\converted\austin
 ```
 
 ## Clean rerun with multiprocessing
 
 ```bash
-python -m calinet.convert \
-    --input-dir Z:\CALINET2\sourcedata\bielefeld\
-    --output-dir Z:\CALINET2\converted\bielefeld\
-    --clean\
-    --n-workers 4
+python -m calinet.convert `
+  --input-dir Z:\CALINET2\sourcedata\bielefeld `
+  --output-dir Z:\CALINET2\converted\bielefeld ` 
+  --clean `
+  --n-workers 4
 ```
 
 ## Debug run
 
 ```bash
-python -m calinet.convert \
-    --input-dir Z:\CALINET2\sourcedata\bonn\
-    --output-dir Z:\CALINET2\converted\bonn\
-    --clean\
-    --debug\
-    --n-workers 1
+python -m calinet.convert `
+  --input-dir Z:\CALINET2\sourcedata\bonn `
+  --output-dir Z:\CALINET2\converted\bonn `
+  --clean `
+  --debug `
+  --n-workers 1
 ```
 
 ---
