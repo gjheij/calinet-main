@@ -37,7 +37,7 @@ Converts lab-specific raw datasets into a standardized BIDS-like structure.
 ### Example
 
 ```bash
-python -m calinet.convert `
+python -m calinet_convert `
     --input-dir <some_path>/sourcedata/lab `
     --output-dir <some_path>/converted/lab `
     --n-workers 4 `
