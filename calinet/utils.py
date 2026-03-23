@@ -25,6 +25,44 @@ SUBJECT_RE = re.compile(
 )
 
 
+def _get_units(meta: dict, modality: str) -> str:
+    """
+    Try a few common metadata layouts.
+    """
+    if modality in meta and isinstance(meta[modality], dict):
+        return meta[modality].get("Units", "")
+
+    channels = meta.get("Channels")
+    if isinstance(channels, dict) and modality in channels:
+        channel_meta = channels[modality]
+        if isinstance(channel_meta, dict):
+            return channel_meta.get("Units", "")
+
+    return ""
+
+
+def _is_events_tsv(fname: str) -> bool:
+    return fname.endswith(".tsv") and "events" in fname
+
+
+def _is_events_json(fname: str) -> bool:
+    return fname.endswith(".json") and "events" in fname
+
+
+def _extract_task(fname: str) -> Optional[str]:
+    match = re.search(r"_task-([A-Za-z0-9]+)_", fname)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _extract_recording(fname: str) -> Optional[str]:
+    match = re.search(r"_recording-([A-Za-z0-9]+)_", fname)
+    if match:
+        return match.group(1)
+    return None
+
+
 def find_events_file_xlsx(
         raw_path: str,
         file_key: str
