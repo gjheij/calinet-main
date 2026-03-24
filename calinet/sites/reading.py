@@ -405,7 +405,7 @@ def parse_all_quest_txt_files(
     """
 
     files = find_quest_txt(raw_data_dir)
-    if not files:
+    if not files or len(files)<1:
         logger.warning(f"No 'quest1' files found in {raw_data_dir}; skipping participant pheno.")
         return pd.DataFrame(columns=["participant_id", "age", "sex", "ethnicity", "nationality"])
 
@@ -600,7 +600,7 @@ def parse_questionnaire_file(
 
     # read subject-wise questionnaire txt files
     df_pheno = parse_all_quest_txt_files(raw_data_dir)
-
+    
     # read general info
     df_part = read_participant_file(raw_data_dir)
 
@@ -608,9 +608,15 @@ def parse_questionnaire_file(
         df_part,
         df_pheno,
         on="participant_id",
-        how="inner",
+        how="outer",
         indicator=True
     )
+
+    # rows where df_pheno data is missing
+    missing_pheno = pheno_df[pheno_df["_merge"] == "left_only"]["participant_id"]
+
+    if not missing_pheno.empty:
+        logger.warning(f"{len(missing_pheno)} participants missing phenotype data: {missing_pheno.tolist()}; entries are set to None")
 
     # Extract only the relevant columns for participants.tsv
     info_df = pheno_df[

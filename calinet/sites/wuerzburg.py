@@ -12,6 +12,7 @@ from calinet.core.pheno import pad_missing_columns
 from calinet.utils import (
     rename_col,
     common_write_tsv,
+    append_acq_date_to_df,
     convert_questionnaire_columns_to_int
 )
 
@@ -274,6 +275,38 @@ def parse_questionnaire_file(
     # Sort by numeric ID
     pheno_df["participant_id"] = pheno_df["participant_id"].apply(lambda x: f"sub-{x:03d}")
     pheno_df = pheno_df.sort_values("participant_id").reset_index(drop=True)
+
+
+    # Map each participant to the date of their physiology acquisition file
+    raw_path = os.path.dirname(questionnaire_file)
+    pheno_df = append_acq_date_to_df(
+        pheno_df,
+        raw_path,
+    )
+
+    acq_date = pd.to_datetime(pheno_df["acq_date"], errors="coerce")
+    raw_time = pd.to_datetime(pheno_df["recorded_at"], errors="coerce")  # replace with your real time column
+
+    # invalid if missing or sentinel 1900-01-01
+    invalid_time = raw_time.isna() | raw_time.dt.normalize().eq(pd.Timestamp("1900-01-01"))
+
+    bad_ids = pheno_df.loc[invalid_time, "participant_id"].tolist()
+    if bad_ids:
+        logger.warning(
+            f"Missing/invalid derived time for {len(bad_ids)} participants; "
+            f"falling back to acq_date only: {bad_ids}"
+        )
+
+    # default: acq_date at 00:00:00
+    recorded_at = acq_date.copy()
+
+    # where time is valid, add the time-of-day
+    valid_time = ~invalid_time
+    time_of_day = raw_time.loc[valid_time] - raw_time.loc[valid_time].dt.normalize()
+    recorded_at.loc[valid_time] = acq_date.loc[valid_time] + time_of_day
+
+    pheno_df["recorded_at"] = recorded_at.dt.strftime("%Y-%m-%dT%H:%M:%S")
+    pheno_df.loc[acq_date.isna(), "recorded_at"] = None
 
     # Extract only the relevant columns for participants.tsv
     info_df = pheno_df[
