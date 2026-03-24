@@ -517,7 +517,7 @@ def convert_dataset_to_ezyscr(
 
     multisite_export_mode = is_multisite_export_mode(input_dir, subjects_tsv)
 
-    last_ascii_file = None
+    last_mat_file = None
     last_bundle = None
 
     # ------------------------------------------------------------------
