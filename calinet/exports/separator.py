@@ -9,9 +9,14 @@ import shutil
 import pandas as pd
 from pathlib import Path
 
-from calinet.utils import common_write_tsv
+from calinet import utils
+from calinet.exports.utils import (
+    discover_subjects,
+    should_keep_file,
+    normalize_modalities,
+)
 
-from typing import Union
+from typing import Union, Optional, Iterable
 
 import logging
 logger = logging.getLogger(__name__)
@@ -92,7 +97,7 @@ def write_subject_phenotype(
             
             # write new tsv
             new_tsv = os.path.join(new_pheno, os.path.basename(tsv))
-            _ = common_write_tsv(
+            _ = utils.common_write_tsv(
                 df_sub,
                 id_key=os.path.basename(tsv).replace(".tsv", ""),
                 language="",
@@ -182,7 +187,7 @@ def write_dataset_info(
             df = pd.read_csv(src_file, delimiter="\t", na_values="n/a")
             df_sub = df.loc[df["participant_id"] == subject_name].copy()
             
-            _ = common_write_tsv(
+            _ = utils.common_write_tsv(
                 df_sub,
                 id_key=os.path.basename(src_file).replace(".tsv", ""),
                 language="",
@@ -198,7 +203,8 @@ def separate_and_zip(
         input_dir: str,
         output_dir: str,
         overwrite: bool=False,
-        include_n: int=None
+        include_n: int=None,
+        modalities: Optional[Iterable[str]]=None
     ) -> None:
     """
     Create per-subject export directories, package them as ZIP archives, and
@@ -214,103 +220,145 @@ def separate_and_zip(
     overwrite: bool
         Overwrite existing zip-files (default = False)
     include_n : int
-        Include only the first N subjects. This is mainly to test if the zipper
-        is working as intended.
-    
+        Include only the first N discovered subjects. This is mainly to test if
+        the zipper is working as intended.
+    modalities : Optional[Iterable[str]]
+        Modalities to include in the packaged subject exports. If None, all
+        files are included. Files without an identifiable modality are always
+        retained.
+
     Returns
     -------
     None
 
     Notes
     -----
-    This function discovers subject directories in ``input_dir`` whose names
-    start with ``"sub-"``. In the current implementation, the discovered list is
-    then replaced by a hard-coded list of the first five CALINET-style subject
-    identifiers derived from the basename of ``input_dir``.
+    This function uses ``discover_subjects`` to support both flat datasets
+    (``input_dir/sub-*``) and multi-site datasets (``input_dir/<site>/sub-*``).
+    Similar to the blinder export logic, modality filtering is applied at file
+    level so only requested recording types are included while dataset-level
+    files are preserved.
 
     For each selected subject, the function:
 
     1. copies the full subject directory into a temporary export directory
-    2. writes common dataset-level files into that export directory using
-       ``write_dataset_info``
+    2. writes dataset-level files from the corresponding dataset root into that
+       export directory using ``write_dataset_info``
     3. writes subject-specific phenotype files using
-       ``write_subject_phenotype``
+       ``write_subject_phenotype`` when a phenotype directory exists
     4. creates a ZIP archive from the temporary export directory
     5. removes the temporary export directory after successful archiving
 
     ZIP archives are named from the subject identifier with ``"sub"`` replaced
     by ``"ds"``, for example ``"sub-001"`` -> ``"ds-001.zip"``.
 
-    If a ZIP archive already exists for a subject, that subject is skipped.
-
-    If no subject folders are found in ``input_dir``, the function logs a
-    warning and returns.
-
-    This function performs filesystem listing, directory copies, directory
-    creation, archive creation, directory removal, standard output printing,
-    and logging.
+    If a ZIP archive already exists for a subject, that subject is skipped
+    unless ``overwrite`` is True.
     """
-    
-    subjects = [i for i in os.listdir(input_dir) if i.startswith("sub-")]
-    
-    lab = os.path.basename(input_dir).capitalize()
 
-    # include first N subjects if desired
+    input_dir = os.path.abspath(input_dir)
+    output_dir = os.path.abspath(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    subject_records = discover_subjects(input_dir)
+    selected_modalities = normalize_modalities(modalities)
+    found_modalities: set[str] = set()
+
+    if not subject_records:
+        logger.warning(f"No 'sub-' folders found in '{input_dir}'")
+        return
+
     if include_n is not None:
         logger.info(f"Including first N={include_n} subjects from '{input_dir}'")
-        subjects = [f'sub-Calinet{lab}{i+1:02d}' for i in range(include_n)]
+        subject_records = subject_records[:include_n]
 
-    if not subjects:
-        logger.warning(f"No 'sub-' folders found in {input_dir}")
-        return
-    else:
-        logger.info(f"Found {len(subjects)} subjects in '{input_dir}'")
+    logger.info(f"Found {len(subject_records)} subjects in '{input_dir}'")
 
-    for subject in subjects:
-        subj_dir = os.path.join(input_dir, subject)
-        new_base = os.path.join(output_dir, subject.replace('sub', 'ds'))
+    for rec in subject_records:
+        subject = rec["subject_id"]
+        subj_dir = rec["subject_path"]
+        dataset_root = rec["dataset_root"]
+        site = rec.get("site")
+
+        zip_stem = subject.replace('sub', 'ds', 1)
+        zip_parent = Path(output_dir)
+        if site is not None:
+            zip_parent.mkdir(parents=True, exist_ok=True)
+
+        new_base = str(zip_parent / zip_stem)
         new_subj = os.path.join(new_base, subject)
-
-        zip_path = Path(output_dir) / f"{subject.replace('sub', 'ds')}.zip"
+        zip_path = zip_parent / f"{zip_stem}.zip"
 
         if zip_path.is_file() and not overwrite:
             logger.info(f"Zip for '{subject}' exists. Skipping..")
-        else:
-            if zip_path.is_file() and overwrite:
-                logger.info(f"Zip for '{subject}' exists. Overwriting..")
-                zip_path.unlink()
+            continue
 
-            if os.path.isdir(new_base):
-                logger.info(f"Removing existing temp dir '{new_base}'")
-                shutil.rmtree(new_base)
+        if zip_path.is_file() and overwrite:
+            logger.info(f"Zip for '{subject}' exists. Overwriting..")
+            zip_path.unlink()
 
-            # copy whole folder over to new directory
-            logger.info(f"Copying original folder {subj_dir} to {new_subj}")
-            shutil.copytree(subj_dir, new_subj, dirs_exist_ok=True)
-
-            # store common files in there
-            write_dataset_info(
-                input_dir,
-                subject,
-                new_base
-            )
-
-            # store phenotype in subject dir
-            phenotype_dir = os.path.join(input_dir, "phenotype")
-            write_subject_phenotype(
-                phenotype_dir,
-                subject,
-                new_base
-            )
-
-            # make zip
-            shutil.make_archive(
-                new_base,
-                'zip',
-                root_dir=new_base
-            )
-
-            logger.info(f"Created zip for subject '{subject}': {new_base}")
-            logger.info(f"Removing '{subject}': {new_base}")
+        if os.path.isdir(new_base):
+            logger.info(f"Removing existing temp dir '{new_base}'")
             shutil.rmtree(new_base)
-            logger.info("Done")
+
+        logger.info(f"Copying original folder {subj_dir} to {new_subj}")
+        shutil.copytree(
+            subj_dir,
+            new_subj,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(),
+        )
+
+        if selected_modalities is not None:
+            for root, _, files in os.walk(new_subj):
+                for fname in files:
+                    src = os.path.join(root, fname)
+                    rel_file = os.path.relpath(src, new_subj)
+                    if not should_keep_file(fname, selected_modalities):
+                        logger.debug(f"Removing file due to modality filter: '{rel_file}'")
+                        os.remove(src)
+                        continue
+
+                    modality = utils._extract_recording(fname)
+                    if modality is not None:
+                        found_modalities.add(modality)
+        else:
+            for root, _, files in os.walk(new_subj):
+                for fname in files:
+                    modality = utils._extract_recording(fname)
+                    if modality is not None:
+                        found_modalities.add(modality)
+
+        write_dataset_info(
+            dataset_root,
+            subject,
+            new_base
+        )
+
+        phenotype_dir = os.path.join(dataset_root, "phenotype")
+        write_subject_phenotype(
+            phenotype_dir,
+            subject,
+            new_base
+        )
+
+        shutil.make_archive(
+            new_base,
+            'zip',
+            root_dir=new_base
+        )
+
+        logger.info(f"Created zip for subject '{subject}': {new_base}")
+        logger.info(f"Removing '{subject}': {new_base}")
+        shutil.rmtree(new_base)
+        logger.info("Done")
+
+    if found_modalities:
+        logger.info(f"Modalities found in dataset: {sorted(found_modalities)}")
+
+    if selected_modalities is not None:
+        missing_modalities = sorted(selected_modalities - found_modalities)
+        if missing_modalities:
+            logger.warning(
+                f"Requested modalities not found in dataset: {missing_modalities}"
+            )
