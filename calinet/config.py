@@ -57,8 +57,12 @@ available_labs = {
             "stai": 40
         },
         "ChannelRegex": {
-            "SCR": re.compile(r"SCR - EDA100C", re.I),
-            "TTL": re.compile(r"stim_marker", re.I),
+            "data_key": "data",
+            "scr_channel": 2,
+            "ttl_channel": 3,
+            "low_percentile": 60,   # filters out low US triggers
+            "high_percentile": 95,  # filters out high 'start-of-block' triggers,
+            "sampling_rate_hz": 1000.0  # default; verify with specified metadata
         },
         "gap_factor_between_acq_ext": 5,
         "has_eyetrack": None
