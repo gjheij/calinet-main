@@ -28,6 +28,17 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--modalities",
+        nargs="+",
+        default=None,
+        help=(
+            "Only include selected recording modalities, e.g. "
+            "--modalities scr eye2 resp. "
+            "If omitted, all modalities are included."
+        ),
+    )
+
+    parser.add_argument(
         "--first",
         type=int,
         default=None,
@@ -81,5 +92,6 @@ if __name__ == "__main__":
         raw_data_dir,
         output_dir,
         overwrite=args.overwrite,
-        include_n=args.first
+        include_n=args.first,
+        modalities=args.modalities
     )
