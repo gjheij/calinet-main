@@ -93,13 +93,48 @@ python calinet_select.py `
 
 which will print something like this:
 ```log
-[2026-03-22 14:24:17.042] [-] [INFO] calinet.blinder - Log-file: <some_path>\derivatives\exports\EXP_2026-03-22_Test_N10_seed1234\log.log
-[2026-03-22 14:24:17.042] [-] [INFO] calinet.blinder - Raw dataset: <some_path>\converted
-[2026-03-22 14:24:17.042] [-] [INFO] calinet.blinder - Saving blinded dataset to: <some_path>\derivatives\exports\EXP_2026-03-22_Test_N10_seed1234
-[2026-03-22 14:24:17.057] [-] [INFO] calinet.blinder - Using exported subject list: <some_path>\derivatives\exports\EXP_2026-03-22_Test_N10_seed1234\participants.tsv
+[2026-03-24 15:56:38.512] [-] [INFO] calinet.select - Log-file: <some_path>\derivatives\exports\log.log
+[2026-03-24 15:56:38.512] [-] [INFO] calinet.select - Output directory: <some_path>\derivatives\exports
+[2026-03-24 15:56:38.512] [-] [INFO] calinet.select - Sampling method: equal
+[2026-03-24 15:56:38.518] [-] [INFO] calinet.select - Requested N: 10
+[2026-03-24 15:56:38.518] [-] [INFO] calinet.select - Recipient lab: Test
+[2026-03-24 15:56:38.551] [-] [INFO] calinet.select - Loaded existing registry: <some_path>\derivatives\exports\participants_registry.tsv
+[2026-03-24 15:56:38.601] [-] [INFO] calinet.select - Saved registry to: <some_path>\derivatives\exports\participants_registry.tsv
+[2026-03-24 15:56:38.602] [-] [INFO] calinet.select - Batch ID: EXP_2026-03-22_Test_N10_seed1234
 ```
 
 The `<some_path>\derivatives\exports\EXP_2026-03-22_Test_N10_seed1234` directory can be directly used for the conversion to data formats required by other software packages (e.g., `blinding` stimulus events, `EzySCR`, and `Autonomate`).
+
+To select a new subset of non-overlapping subjects, pass the ``--participants-tsv`` flag pointing to the ``registry``-file:
+
+```bash
+python .\calinet_select.py `
+  --input-dir ..\..\..\converted\ `
+  --n 150 `
+  --recipient-lab Test2 `
+  --participants-tsv ..\..\..\derivatives\exports\participants_registry.tsv
+```
+
+which will output something like:
+```log
+[2026-03-24 15:56:38.512] [-] [INFO] calinet.select - Log-file: <some_path>\derivatives\exports\log.log
+[2026-03-24 15:56:38.512] [-] [INFO] calinet.select - Output directory: <some_path>\derivatives\exports
+[2026-03-24 15:56:38.512] [-] [INFO] calinet.select - Sampling method: equal
+[2026-03-24 15:56:38.518] [-] [INFO] calinet.select - Requested N: 150
+[2026-03-24 15:56:38.518] [-] [INFO] calinet.select - Recipient lab: Test2
+[2026-03-24 15:56:38.551] [-] [INFO] calinet.select - Loaded existing registry: <some_path>\derivatives\exports\participants_registry.tsv
+[2026-03-24 15:56:38.601] [-] [INFO] calinet.select - Saved registry to: <some_path>\derivatives\exports\participants_registry.tsv
+[2026-03-24 15:56:38.602] [-] [INFO] calinet.select - Batch ID: EXP_2026-03-24_Test2_N150_seed1234
+Traceback (most recent call last):
+  File "<some_path>\code\calinet-main\scripts\calinet_select.py", line 134, in <module>
+    selected_df = select_subjects(
+  File "\\caian-nas\Exchange\CALINET2\code\calinet-main\calinet\exports\selector.py", line 594, in select_subjects
+    raise ValueError(
+ValueError: Requested n=150, but only 98 eligible subjects are available
+```
+
+It will throw an error if you select more participants than available after filtering for previously-exported participants.
+To include participants that already have been exported before, use ``--include-previously-exported``.
 
 ### Output
 
@@ -220,7 +255,7 @@ python calinet_ezyscr.py `
 ### Output
 
 ```bash
-exports/
+exports/ 
   EXP_2026-03-22_Test_N10_seed1234/
     EzySCR
       sub-*
@@ -229,6 +264,12 @@ exports/
       participants.json
       participants.tsv
 ```
+
+# Prepare Calibench upload
+
+Calibench expects compressed files that it then later unzips into it's own data folder. 
+We can quickly zip everything with `calinet_separate.py`:
+
 
 ---
 
