@@ -84,6 +84,13 @@ if __name__ == "__main__":
         help="Overwrite an existing blinded output directory",
     )
 
+
+    parser.add_argument(
+        "--skip-blinding",
+        action="store_true",
+        help="Do not blind the stimulus types, just copy as is to send out as test samples",
+    )
+
     args = parser.parse_args()
 
     input_dir = os.path.abspath(args.input_dir)
@@ -115,5 +122,6 @@ if __name__ == "__main__":
         include_n=args.first,
         modalities=args.modalities,
         subjects_tsv=args.subjects_tsv,
-        task_name=args.task
+        task_name=args.task,
+        skip_blinding=args.skip_blinding
     )
