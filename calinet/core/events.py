@@ -400,13 +400,14 @@ def parse_events_xlsx(event_file, task_name, event_onsets):
 
 
 def write_events_to_file(
-    events_df: pd.DataFrame,
-    events_tpl: dict=None,
-    subject_name: str=None,
-    beh_folder: str=None,
-    task_name:str=None,
-    levels_dict: dict=None
-):
+        events_df: pd.DataFrame,
+        events_tpl: dict=None,
+        subject_name: str=None,
+        beh_folder: str=None,
+        task_name:str=None,
+        levels_dict: dict=None
+    ) -> str:
+
     # Events JSON
     events_json_output_path = os.path.join(
         beh_folder,
@@ -429,16 +430,18 @@ def write_events_to_file(
     )
 
     logger.info(f"Saved {task_name} events to {events_tsv_output_path}")
+    return events_tsv_output_path
 
 
 def handle_events(
-    raw_path: str=None,
-    conv_path: str=None,
-    subject_name: str=None,
-    events_dict: dict=None,
-    events_tpl: dict=None,
-    write_files: bool=True
-) -> Tuple[dict, dict]:
+        raw_path: str=None,
+        conv_path: str=None,
+        subject_name: str=None,
+        events_dict: dict=None,
+        events_tpl: dict=None,
+        write_files: bool=True
+    ) -> Tuple[dict, dict]:
+    
     logger.info("Processing events data")
 
     sessions = {
@@ -489,11 +492,12 @@ def handle_events(
             )
             return None, None
 
+
     def _write_events(events_df, **kwargs):
         beh_folder = os.path.join(conv_path, "physio")
         os.makedirs(beh_folder, exist_ok=True)
 
-        write_events_to_file(
+        return write_events_to_file(
             events_df,
             events_tpl=events_tpl,
             subject_name=subject_name,
@@ -525,20 +529,21 @@ def handle_events(
             )
             continue
         
-        task_events[task_name] = df_events.copy()
         if write_files:
             try:
-                _write_events(
+                ev_file = _write_events(
                     df_events,
                     task_name=task_name,
                     levels_dict=levels_dict
                 )
-
+                task_events[task_name] = ev_file
                 logger.info(f"Created events data for {subject_name}, task-{task_name}")
             except Exception:
                 logger.exception(
                     f"Error creating events for {subject_name}, task-{task_name}"
                 )
+        else:
+            task_events[task_name] = df_events.copy()
 
     return task_ratings, task_events
 

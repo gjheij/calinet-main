@@ -813,7 +813,7 @@ def create_physioevents_files(
         output_base: str=None,
         eye_mm: dict=None,
         write_files: bool=True,
-        onsets: pd.DataFrame=None,
+        onsets: Union[str, pd.DataFrame]=None,
         **kwargs
     ) -> dict:
     """
@@ -837,9 +837,9 @@ def create_physioevents_files(
         containing preprocessed eye-tracking data (in millimeters).
     write_files : bool, default=True
         If True, writes physiological event files and corresponding JSON metadata.
-    onsets : pandas.DataFrame, optional
-        DataFrame containing onset times (e.g., from experimental markers).
-        Used to align eye-tracking time with physiological recordings.
+    onsets : str, pandas.DataFrame, optional
+        Path or dataFrame containing onset times (e.g., from experimental markers).
+        Used to align eye-tracking time with physiological recordings.    
     **kwargs
         Additional keyword arguments passed to `fetch_physioevents`.
 
@@ -957,6 +957,11 @@ def create_physioevents_files(
             logger.warning(f"No onsets specified, cannot align eye-tracking and physiological data..")
             diff = 0
         else:
+            # read dataframe
+            if isinstance(onsets, str):
+                logger.info(f"Reading events from file: '{onsets}'")
+                onsets = pd.read_csv(onsets, delimiter="\t")
+
             t_phys = first_event_in_physioevents(phys_events)
             t_mark = float(onsets.iloc[0, 0])
             diff = t_mark-t_phys
@@ -1012,7 +1017,7 @@ def process_eyetracker_file(
         eye_file: str=None,
         output_base: str=None,
         lab_name: str=None,
-        onsets: list=None,
+        onsets: Union[str, list]=None,
         write_files: bool=True,
         **kwargs
     ) -> None:
@@ -1034,20 +1039,14 @@ def process_eyetracker_file(
         Base path for all generated output files (TSV and JSON).
     lab_name : str, optional
         Name of the lab or setup, used for metadata generation.
-    onsets : list, optional
-        List or array of onset times used to align eye-tracking data with
-        external physiological recordings.
+    onsets : str, list, optional
+        String point to events file or list/array of onset times used to align 
+        eye-tracking data with external physiological recordings.
     write_files : bool, default=True
         If True, writes all generated outputs (TSV and JSON files) to disk.
     **kwargs
         Additional keyword arguments passed to downstream processing functions,
         such as `fetch_and_write_eye_data`.
-
-    Returns
-    -------
-    None
-        This function does not return any value. Processed data are written to
-        disk and intermediate results are handled internally.
 
     Notes
     -----
@@ -1119,6 +1118,16 @@ def process_eyetracker_file(
         )
     else:
         logger.warning(f"No valid eye-tracking data detected (see messages above), skipping physioevents.")
+
+    if isinstance(onsets, str):
+        onsets_json = onsets.replace(".tsv", ".json")
+        if not os.path.exists(onsets_json):
+            logger.warning(f"Could not find '{onsets_json}'. Cannot update 'StimulusPresentation'")
+
+        logger.info(f"Updating 'StimulusPresentation' in '{onsets_json}'")
+        ev_meta = load_json(onsets_json)
+        ev_meta.update(stim_pres)
+        save_json(onsets_json, ev_meta)
 
 
 def find_eye_files(raw_path):
