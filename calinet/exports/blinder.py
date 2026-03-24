@@ -14,7 +14,9 @@ from calinet import utils
 import calinet.core.io as cio
 from calinet.exports.utils import (
     filter_subjects,
+    should_keep_file,
     discover_subjects,
+    normalize_modalities,
     is_multisite_export_mode,
     load_subjects_from_export,
     maybe_copy_participant_files
@@ -158,7 +160,8 @@ def _copy_tree(
         modalities: Optional[set[str]]=None,
         skip_pheno: bool=False,
         found_modalities: Optional[set[str]]=None,
-        task_name: Optional[str]=None
+        task_name: Optional[str]=None,
+        skip_blinding: Optional[bool]=False
     ) -> None:
     """
     Recursively copy a dataset tree with optional filtering and transformation.
@@ -181,6 +184,8 @@ def _copy_tree(
         Mutable set used to collect modalities encountered during copying.
     task_name : str
         Task name to export, such as ``"acquisition"``. If None, all tasks ['acquisition', 'extinction'] will be used.
+    skip_blinding: Optional[bool], default=False
+        Copy selected directories as is, without blinding stimulus events
 
     Returns
     -------
@@ -213,7 +218,7 @@ def _copy_tree(
         os.makedirs(out_root, exist_ok=True)
 
         for fname in files:
-            if not _should_keep_file(fname, modalities):
+            if not should_keep_file(fname, modalities):
                 logger.debug(f"Skipping file due to modality filter: '{fname}'")
                 continue
             
@@ -231,76 +236,21 @@ def _copy_tree(
                 found_modalities.add(modality)
 
             try:
-                if utils._is_events_tsv(fname):
-                    logger.info(f"Blinding events TSV: '{rel_file}'")
-                    _process_events_tsv(in_path, out_path)
-                elif utils._is_events_json(fname):
-                    logger.info(f"Blinding events JSON: '{rel_file}'")
-                    _process_events_json(in_path, out_path)
+                if not skip_blinding:
+                    if utils._is_events_tsv(fname):
+                        logger.info(f"Blinding events TSV: '{rel_file}'")
+                        _process_events_tsv(in_path, out_path)
+                    elif utils._is_events_json(fname):
+                        logger.info(f"Blinding events JSON: '{rel_file}'")
+                        _process_events_json(in_path, out_path)
+                    else:
+                        shutil.copy2(in_path, out_path)
                 else:
+                    logger.debug(f"Skipping blinding, copying '{rel_file}' as is")
                     shutil.copy2(in_path, out_path)
             except Exception as e:
                 logger.error(f"Failed processing '{in_path}': {e}")
                 raise
-
-
-def _normalize_modalities(
-        modalities: Optional[Iterable[str]]
-    ) -> Optional[set[str]]:
-    """
-    Normalize modality identifiers into a canonical lowercase set.
-
-    Parameters
-    ----------
-    modalities : Optional[Iterable[str]]
-        Iterable of modality names.
-
-    Returns
-    -------
-    Optional[set[str]]
-        Set of normalized modality names, or None if input is None.
-
-    Notes
-    -----
-    - Empty or whitespace-only entries are ignored.
-    - All values are converted to lowercase and stripped.
-    """
-    if modalities is None:
-        return None
-    return {m.strip().lower() for m in modalities if str(m).strip()}
-
-
-def _should_keep_file(
-        fname: str,
-        modalities: Optional[set[str]]
-    ) -> bool:
-    """
-    Determine whether a file should be retained based on modality filtering.
-
-    Parameters
-    ----------
-    fname : str
-        Filename to evaluate.
-    modalities : Optional[set[str]]
-        Allowed modalities. If None, all files are retained.
-
-    Returns
-    -------
-    bool
-        True if the file should be kept, False otherwise.
-
-    Notes
-    -----
-    - Files without identifiable modality are always retained.
-    """
-    if modalities is None:
-        return True
-
-    modality = utils._extract_recording(fname)
-    if modality is None:
-        return True
-
-    return modality in modalities
 
 
 def blind_dataset(
@@ -309,7 +259,8 @@ def blind_dataset(
         include_n: Optional[int]=None,
         modalities: Optional[Iterable[str]]=None,
         task_name: Optional[str]=None,
-        subjects_tsv: Optional[str]=None
+        subjects_tsv: Optional[str]=None,
+        skip_blinding: Optional[bool]=False
     ) -> None:
     """
     Create a blinded copy of a dataset with optional subject and modality filtering.
@@ -333,6 +284,8 @@ def blind_dataset(
         Task name to export, such as ``"acquisition"``. If None, all tasks ['acquisition', 'extinction'] will be used.
     subjects_tsv : Optional[str], default=None
         Path to a TSV file specifying selected subjects.
+    skip_blinding: Optional[bool], default=False
+        Copy selected directories as is, without blinding stimulus events
 
     Returns
     -------
@@ -380,7 +333,7 @@ def blind_dataset(
     else:
         selected_subjects = filter_subjects(all_subjects, include_n)
 
-    selected_modalities = _normalize_modalities(modalities)
+    selected_modalities = normalize_modalities(modalities)
     found_modalities: set[str] = set()
 
     maybe_copy_participant_files(
@@ -423,7 +376,8 @@ def blind_dataset(
                 modalities=selected_modalities,
                 skip_pheno=True,
                 found_modalities=found_modalities,
-                task_name=task_name
+                task_name=task_name,
+                skip_blinding=skip_blinding
             )
 
     # ------------------------------------------------------------------

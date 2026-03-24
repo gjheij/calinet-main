@@ -1313,6 +1313,7 @@ def append_acq_date_to_df(
     logger.info(f"Fetching acquisition date from PsychoPy-files for 'recorded_at'")
     creation_dates = fetch_creation_dates(raw_path)
     
+    print(len(creation_dates), pheno_df.shape)
     # add to dataframe
     pheno_df["acq_date"] = pheno_df["participant_id"].map(creation_dates)
     missing_mask = pheno_df["acq_date"].isna()

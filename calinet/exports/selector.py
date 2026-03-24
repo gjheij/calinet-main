@@ -12,12 +12,10 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 
-from copy import deepcopy
 from pathlib import Path
 import pandas as pd
 import calinet.core.io as cio
-from calinet.templates.common import PARTICIPANT_INFO_SPEC
-
+from calinet.exports.utils import build_participants_sidecar
 
 EXPORT_TRACKING_COLUMNS = [
     "eligible_for_export",
@@ -26,68 +24,6 @@ EXPORT_TRACKING_COLUMNS = [
     "last_export_batch",
     "last_export_date",
 ]
-
-
-def build_participants_sidecar(
-        df: pd.DataFrame
-    ) -> dict:
-    """
-    Build a BIDS-style ``participants.json`` sidecar from the participant table.
-
-    This function starts from the CALINET participant metadata template and
-    constructs a sidecar dictionary containing metadata entries relevant to the
-    columns present in ``df``. Template-defined metadata blocks are preserved
-    only when the corresponding dataframe columns exist, with the exception of
-    top-level metadata blocks that should always be retained.
-
-    For dataframe columns that are not represented in the template, the
-    function adds a fallback metadata entry containing a simple default
-    description.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Participant-level table that will be written as ``participants.tsv``.
-        Column names are used to determine which metadata fields should be
-        retained from the template and which fallback entries should be added.
-
-    Returns
-    -------
-    dict
-        A dictionary suitable for serialization as a BIDS-style
-        ``participants.json`` sidecar. Keys correspond to dataframe columns
-        and preserved metadata blocks, and values are metadata dictionaries.
-
-    Notes
-    -----
-    - Metadata is derived from ``PARTICIPANT_INFO_SPEC``.
-    - The ``MeasurementToolMetadata`` block is always preserved when present
-      in the template.
-    - Any dataframe column not covered by the template is given a fallback
-      entry of the form ``{"Description": "<column> field"}``.
-    - This function does not validate BIDS compliance beyond constructing a
-      metadata mapping aligned to the dataframe columns.
-
-    See Also
-    --------
-    write_participants_files : Write participant TSV and JSON files together.
-    """
-    spec = deepcopy(PARTICIPANT_INFO_SPEC)
-
-    keep = {"MeasurementToolMetadata"}
-    keep.update([col for col in df.columns if col in spec])
-
-    sidecar = {}
-    for key, value in spec.items():
-        if key in keep:
-            sidecar[key] = value
-
-    # Add fallback descriptions for columns not covered by template
-    for col in df.columns:
-        if col not in sidecar:
-            sidecar[col] = {"Description": f"{col} field"}
-
-    return sidecar
 
 
 def write_participants_files(
