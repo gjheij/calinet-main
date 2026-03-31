@@ -16,6 +16,7 @@ from calinet.core.io import (
     save_json
 )
 
+from calinet.core.units import normalize_bids_unit
 from calinet.config import config, available_labs
 
 from typing import Union
@@ -667,11 +668,17 @@ def fill_general(lab_name: str, modality_name: str, json_content: dict) -> dict:
 
 def fill_scr_json(lab_name: str, json_content: dict) -> dict:
 
-    meta = _meta_for(df_meta, "SCR")
+    meta = _meta_for(df_meta, "EDA")
     scr = json_content.setdefault("scr", {})
     scr["SCRCouplerType"] = _get(meta, "EDA coupler type", lab_name)
     scr["SCRCouplerVoltage"] = _get(meta, "EDA coupler voltage", lab_name)
     scr["Placement"] = _get(meta, "Placement", lab_name)
+
+    # fill adhoc
+    if scr["Units"] is None:
+        unit = normalize_bids_unit(_get(meta, "units", lab_name))
+        logger.warning(f"Filling 'Units' from metadata: {unit}")
+        scr["Units"] = unit
 
     return json_content
 
@@ -681,6 +688,12 @@ def fill_ecg_json(lab_name: str, json_content: dict) -> dict:
     meta = _meta_for(df_meta, "ECG")
     ecg = json_content.setdefault("ecg", {})
     ecg["Placement"] = _get(meta, "Placement", lab_name)
+    
+    # fill adhoc
+    if ecg["Units"] is None:
+        unit = normalize_bids_unit(_get(meta, "units", lab_name))
+        logger.warning(f"Filling 'Units' from metadata: {unit}")
+        ecg["Units"] = unit
 
     return json_content
 
@@ -692,6 +705,12 @@ def fill_ppg_json(lab_name, json_content):
     ppg["SensorType"] = _get(meta, "Sensor Type", lab_name)
     ppg["Placement"] = _get(meta, "Placement", lab_name)
 
+    # fill adhoc
+    if ppg["Units"] is None:
+        unit = normalize_bids_unit(_get(meta, "units", lab_name))
+        logger.warning(f"Filling 'Units' from metadata: {unit}")
+        ppg["Units"] = unit
+
     return json_content
 
 
@@ -701,5 +720,11 @@ def fill_resp_json(lab_name, json_content):
     resp = json_content.setdefault("resp", {})
     resp["SensorType"] = _get(meta, "Sensor Type", lab_name)
     resp["Placement"] = _get(meta, "Placement", lab_name)
+
+    # fill adhoc
+    if resp["Units"] is None:
+        unit = normalize_bids_unit(_get(meta, "units", lab_name))
+        logger.warning(f"Filling 'Units' from metadata: {unit}")
+        resp["Units"] = unit
 
     return json_content
