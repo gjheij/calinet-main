@@ -67,19 +67,19 @@ def read_raw_physio_file(
     """
 
     # Extract physiological data
-    logger.info(f"Reading .mat file: {raw_physio_acq}")
+    logger.info(f"Amsterdam .mat file: {raw_physio_acq}")
 
     # read acqknowledge file
     lab_name = __name__.split(".")[-1]
 
     args = available_labs.get(lab_name).get("ChannelRegex")
     
-    logger.debug(f"Received arguments for reading file: {args}")
+    logger.debug(f"Received arguments for Amsterdam file: {args}")
     try:
         res = mat.read_mat_file(raw_physio_acq, **args)
         logger.info("Loading mat-file successfull")
     except Exception as e:
-        raise Exception(f"Error while reading '{raw_physio_acq}': {e}") from e
+        raise Exception(f"Error while Amsterdam '{raw_physio_acq}': {e}") from e
     
     # extract dataframe and sampling rate
     physio_df = res.df
@@ -99,7 +99,7 @@ def find_physio_acq_file(
     Unlike the Bonn implementation, which reads a single physiology
     ``.acq`` file with ``biopac.read_acq_file``, the Amsterdam pipeline reads 
     ``.mat`` file input using ``mat.read_mat_file``. The mat-file is expected
-    to be in the sub-folder.
+    to be in the ssub-folder.
 
     Parameters
     ----------
@@ -162,7 +162,7 @@ def find_questionnaire_file(
     Find the Bonn questionnaire source file under the raw data tree.
 
     The Bonn implementation searches recursively for a questionnaire export
-    file called 'CALINETBonn2_DATA_2026-03-13_1000'.
+    file called 'Calinet participant data'.
 
     Parameters
     ----------
@@ -187,7 +187,7 @@ def find_questionnaire_file(
     questionnaire_file = None
     for root, _, files in os.walk(raw_data_dir):
         for filename in files:
-            if "CALINETBonn2_DATA_2026-03-13_1000" in filename:
+            if "Calinet participant data" in filename:
                 questionnaire_file = os.path.join(root, filename)
                 break
     return questionnaire_file
@@ -232,39 +232,32 @@ def parse_questionnaire_file(
     """
 
     # read excel file
-    pheno_df = pd.read_csv(questionnaire_file, delimiter=",")
+    pheno_df = pd.read_excel(questionnaire_file)
 
     # Normalize column names
     pheno_df.columns = pheno_df.columns.str.strip().str.lower()
 
+    # lab specific renaming
+    pheno_df.rename(
+        columns={
+            "subject": "participant_id",
+            "room_temp": "room_temperature",
+            "room_humid": "humidity",
+            "time": "recorded_at"
+        },
+        inplace=True
+    )
+
     # Ensure the required columns exist
-    required_columns = ["record_id", "age", "sex", "handedness_q"]
+    required_columns = ["participant_id", "age", "sex", "handedness"]
     for col in required_columns:
         if col not in pheno_df.columns:
             raise ValueError(
                 f"Missing required column '{col}' in questionnaire file: {questionnaire_file}"
             )
 
-    # lab specific renaming
-    pheno_df.rename(
-        columns={
-            "record_id": "participant_id",
-            "handedness_q": "handedness",
-            "participant_information_timestamp": "recorded_at",
-            "room_temp": "room_temperature",
-            "room_humidity": "humidity",
-        },
-        inplace=True
-    )
+    handedness_mapping = {"right-handed": "right", "left-handed": "left"}
 
-    for col in ["sex", "handedness"]:
-        pheno_df[col] = pheno_df[col].astype(int)
-
-    # Map gender and handedness values for all rows
-    gender_mapping = {1: "male", 2: "female"}
-    handedness_mapping = {1: "left", 2: "right"}
-
-    pheno_df["sex"] = pheno_df["sex"].map(gender_mapping).astype(object)
     pheno_df["handedness"] = pheno_df["handedness"].map(handedness_mapping).astype(object)
     
     # Convert participant_id to the format sub-01, sub-02, etc.
@@ -292,34 +285,37 @@ def aggr_bfi_data(
         phenotype_dir: str
     ) -> Optional[pd.DataFrame]:
     """
-    Aggregate BFI questionnaire data and write the output TSV.
+    Aggregate Amsterdam BFI questionnaire data and write the output TSV.
 
-    This is the Bonn reference implementation. It selects BFI item columns,
-    renames them to the standardized output schema, and writes the TSV file.
+    Compared with the Bonn implementation, the Amsterdam pipeline matches BFI
+    item columns using the exact source prefix ``"bfi_"`` extracted from log
+    files.
 
     Parameters
     ----------
     pheno_df : pandas.DataFrame
-        Phenotype table containing ``"participant_id"`` and BFI items.
+        Phenotype table containing ``"participant_id"`` and Amsterdam BFI item
+        columns matched by the prefix ``"bfi_"``.
     phenotype_dir : str
-        Output directory where the aggregated TSV file is written.
+        Output directory where the aggregated BFI TSV file is written.
 
     Returns
     -------
     subset : pandas.DataFrame or None
         DataFrame returned by ``common_write_tsv`` after writing the TSV
-        file, or ``None`` if no usable columns are available.
+        file, or ``None`` if no usable BFI columns are available.
 
     Notes
     -----
     This function writes a questionnaire TSV file to ``phenotype_dir``.
 
-    Implementation serves as the reference for other labs.
+    Amsterdam-specific matching uses the exact prefix ``"bfi_"`` and renames
+    it to ``"bfi{n_items}_"`` before writing. :contentReference[oaicite:4]{index=4}
     """
 
     # define settings
     current_quest = "bfi"
-    replace_key = f"{current_quest}_2_v"
+    replace_key = f"{current_quest}_"
     n_items = lab_pheno.get(current_quest)
     id_key = f"{current_quest}{n_items}_"
 
@@ -364,31 +360,42 @@ def aggr_gad_data(
         phenotype_dir: str
     ) -> Optional[pd.DataFrame]:
     """
-    Aggregate GAD questionnaire data and write the output TSV.
+    Aggregate Amsterdam GAD questionnaire data and write the output TSV.
 
-    This is the Bonn reference implementation for GAD aggregation.
+    Compared with the Bonn implementation, the Amsterdam pipeline matches GAD
+    item columns using the exact source prefix ``"gad_"`` and excludes
+    columns ending with ``"_total"`` before aggregation.
 
     Parameters
     ----------
     pheno_df : pandas.DataFrame
-        Phenotype table containing ``"participant_id"`` and GAD items.
+        Phenotype table containing ``"participant_id"`` and Amsterdam GAD item
+        columns matched by the prefix ``"gad_"``.
     phenotype_dir : str
-        Output directory where the aggregated TSV file is written.
+        Output directory where the aggregated GAD TSV file is written.
 
     Returns
     -------
     subset : pandas.DataFrame or None
         DataFrame returned by ``common_write_tsv`` after writing the TSV
-        file, or ``None`` if no usable columns are available.
+        file, or ``None`` if no usable GAD columns are available.
 
     Notes
     -----
     This function writes a questionnaire TSV file to ``phenotype_dir``.
+
+    Amsterdam-specific matching uses the exact prefix ``"gad_"`` and excludes
+    columns ending in ``"_total"``. :contentReference[oaicite:5]{index=5}
     """
+
+    # Remove columns that end with '_total'
+    pheno_df = pheno_df[
+        [col for col in pheno_df.columns if not col.endswith("_total")]
+    ]
 
     # define settings
     current_quest = "gad"
-    replace_key = f"{current_quest}7_q"
+    replace_key = f"{current_quest}_"
     n_items = lab_pheno.get(current_quest)
     id_key = f"{current_quest}{n_items}_"
 
@@ -425,7 +432,7 @@ def aggr_gad_data(
     else:
         logging.warning(f"{current_quest.upper()}: No columns available for aggregated data")
         return None
-    
+
 
 # IUS
 def aggr_ius_data(
@@ -433,31 +440,42 @@ def aggr_ius_data(
         phenotype_dir: str
     ) -> Optional[pd.DataFrame]:
     """
-    Aggregate IUS questionnaire data and write the output TSV.
+    Aggregate Amsterdam IUS questionnaire data and write the output TSV.
 
-    This is the Bonn reference implementation for IUS aggregation.
+    Compared with the Bonn implementation, the Amsterdam pipeline matches IUS
+    item columns using the exact source prefix ``"ius_"`` and excludes
+    columns ending with ``"_total"`` before aggregation.
 
     Parameters
     ----------
     pheno_df : pandas.DataFrame
-        Phenotype table containing ``"participant_id"`` and IUS items.
+        Phenotype table containing ``"participant_id"`` and Amsterdam IUS item
+        columns matched by the prefix ``"ius_"``.
     phenotype_dir : str
-        Output directory where the aggregated TSV file is written.
+        Output directory where the aggregated IUS TSV file is written.
 
     Returns
     -------
     subset : pandas.DataFrame or None
         DataFrame returned by ``common_write_tsv`` after writing the TSV
-        file, or ``None`` if no usable columns are available.
+        file, or ``None`` if no usable IUS columns are available.
 
     Notes
     -----
     This function writes a questionnaire TSV file to ``phenotype_dir``.
+
+    Amsterdam-specific matching uses the exact prefix ``"ius_"`` and excludes
+    columns ending in ``"_total"``. :contentReference[oaicite:6]{index=6}
     """
+
+    # Remove columns that end with '_total'
+    pheno_df = pheno_df[
+        [col for col in pheno_df.columns if not col.endswith("_total")]
+    ]
 
     # define settings
     current_quest = "ius"
-    replace_key = f"{current_quest}18_q"
+    replace_key = f"{current_quest}_"
     n_items = lab_pheno.get(current_quest)
     id_key = f"{current_quest}{n_items}_"
 
@@ -502,31 +520,42 @@ def aggr_phq_data(
         phenotype_dir: str
     ) -> Optional[pd.DataFrame]:
     """
-    Aggregate PHQ questionnaire data and write the output TSV.
+    Aggregate Amsterdam PHQ questionnaire data and write the output TSV.
 
-    This is the Bonn reference implementation for PHQ aggregation.
+    Compared with the Bonn implementation, the Amsterdam pipeline matches PHQ
+    item columns using the exact source prefix ``"phq_"`` and excludes
+    columns ending with ``"_total"`` before aggregation.
 
     Parameters
     ----------
     pheno_df : pandas.DataFrame
-        Phenotype table containing ``"participant_id"`` and PHQ items.
+        Phenotype table containing ``"participant_id"`` and Amsterdam PHQ item
+        columns matched by the prefix ``"phq_"``.
     phenotype_dir : str
-        Output directory where the aggregated TSV file is written.
+        Output directory where the aggregated PHQ TSV file is written.
 
     Returns
     -------
     subset : pandas.DataFrame or None
         DataFrame returned by ``common_write_tsv`` after writing the TSV
-        file, or ``None`` if no usable columns are available.
+        file, or ``None`` if no usable PHQ columns are available.
 
     Notes
     -----
     This function writes a questionnaire TSV file to ``phenotype_dir``.
+
+    Amsterdam-specific matching uses the exact prefix ``"phq_"`` and excludes
+    columns ending in ``"_total"``. :contentReference[oaicite:7]{index=7}
     """
+
+    # Remove columns that end with '_total'
+    pheno_df = pheno_df[
+        [col for col in pheno_df.columns if not col.endswith("_total")]
+    ]
 
     # define settings
     current_quest = "phq"
-    replace_key = f"{current_quest}9_q"
+    replace_key = f"{current_quest}_"
     n_items = lab_pheno.get(current_quest)
     id_key = f"{current_quest}{n_items}_"
 
@@ -571,31 +600,42 @@ def aggr_soc_data(
         phenotype_dir: str
     ) -> Optional[pd.DataFrame]:
     """
-    Aggregate SOC questionnaire data and write the output TSV.
+    Aggregate Amsterdam SOC questionnaire data and write the output TSV.
 
-    This is the Bonn reference implementation for SOC aggregation.
+    Unlike the Bonn implementation, which may use different SOC naming,
+    the Amsterdam pipeline matches SOC item columns using the exact source
+    prefix ``"soc_"`` extracted from log files.
 
     Parameters
     ----------
     pheno_df : pandas.DataFrame
-        Phenotype table containing ``"participant_id"`` and SOC items.
+        Phenotype table containing ``"participant_id"`` and Amsterdam SOC item
+        columns matched by the prefix ``"soc_"``.
     phenotype_dir : str
-        Output directory where the aggregated TSV file is written.
+        Output directory where the aggregated SOC TSV file is written.
 
     Returns
     -------
     subset : pandas.DataFrame or None
         DataFrame returned by ``common_write_tsv`` after writing the TSV
-        file, or ``None`` if no usable columns are available.
+        file, or ``None`` if no usable SOC columns are available.
 
     Notes
     -----
     This function writes a questionnaire TSV file to ``phenotype_dir``.
+
+    Amsterdam-specific matching uses the exact prefix ``"soc_"`` and renames
+    it to ``"soc{n_items}_"`` before writing. :contentReference[oaicite:8]{index=8}
     """
+
+    # Remove columns that end with '_total'
+    pheno_df = pheno_df[
+        [col for col in pheno_df.columns if not col.endswith("_total")]
+    ]
 
     # define settings
     current_quest = "soc"
-    replace_key = f"{current_quest}_q"
+    replace_key = f"soc_"
     n_items = lab_pheno.get(current_quest)
     id_key = f"{current_quest}{n_items}_"
 
@@ -640,33 +680,37 @@ def aggr_stai_data(
         phenotype_dir: str
     ) -> Optional[pd.DataFrame]:
     """
-    Aggregate STAI questionnaire data and write the output TSV.
+    Aggregate Amsterdam STAI questionnaire data and write the output TSV.
 
-    This is the Bonn reference implementation for STAI aggregation.
+    Unlike the Bonn implementation, which uses Bonn-specific STAI naming,
+    the Amsterdam pipeline matches STAI item columns using the exact source
+    prefix ``"stait_"``.
 
     Parameters
     ----------
     pheno_df : pandas.DataFrame
-        Phenotype table containing ``"participant_id"`` and STAI items.
+        Phenotype table containing ``"participant_id"`` and Amsterdam STAI
+        item columns matched by the prefix ``"stait_"``.
     phenotype_dir : str
-        Output directory where the aggregated TSV file is written.
+        Output directory where the aggregated STAI TSV file is written.
 
     Returns
     -------
     subset : pandas.DataFrame or None
         DataFrame returned by ``common_write_tsv`` after writing the TSV
-        file, or ``None`` if no usable columns are available.
+        file, or ``None`` if no usable STAI columns are available.
 
     Notes
     -----
     This function writes a questionnaire TSV file to ``phenotype_dir``.
 
-    Implementation serves as the reference for other lab-specific variants.
+    Amsterdam-specific matching uses the exact prefix ``"stait_"`` and
+    renames it to ``"stai{n_items}_"`` before writing. :contentReference[oaicite:9]{index=9}
     """
 
     # define settings
     current_quest = "stai"
-    replace_key = f"{current_quest}g_q"
+    replace_key = f"{current_quest}t_"
     n_items = lab_pheno.get(current_quest)
     id_key = f"{current_quest}{n_items}_"
 

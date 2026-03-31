@@ -46,15 +46,15 @@ available_labs = {
             "Kindt, Merel"
         ],
         "MetaName": "Amsterdam",
-        "Modalities": ["SCR"],
+        "Modalities": ["SCR", "ECG"],
         "Phenotype": {
-            "Language": "german",
-            "bfi": 60,
+            "Language": "english",
+            "bfi": 30,
             "gad": 7,
-            "ius": 18,
+            "ius": 12,
             "phq": 9,
             "soc": 12,
-            "stai": 40
+            "stai": 20
         },
         "ChannelRegex": {
             "data_key": "data",
