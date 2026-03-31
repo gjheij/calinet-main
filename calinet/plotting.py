@@ -332,6 +332,7 @@ def plot_modalities_per_subject(
                 task,
                 mod,
                 ax=ax,
+                root_path=root_path,
                 **local_kwargs
             )
 
