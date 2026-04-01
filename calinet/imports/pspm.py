@@ -4,6 +4,7 @@
 
 import numpy as np
 import pandas as pd
+from pathlib import Path
 
 from dataclasses import dataclass
 from typing import Union, List, Iterable, Optional, Tuple
@@ -18,7 +19,8 @@ unit_defaults = {
     "scr": "uS",
     "ppg": "V",
     "resp": "mV",
-    "markers": "events"
+    "markers": "events",
+    "ttl": "V"
 }
 
 
@@ -42,7 +44,7 @@ class PsPMReadResult:
 
 
 def read_pspm_files(
-        mat_files: Union[str, List[str]]
+        mat_files: Union[str, Path, List[Union[str, Path]]]
     ) -> PsPMReadResult:
     """
     Read and combine PsPM MAT files into a unified dataset.
@@ -54,7 +56,7 @@ def read_pspm_files(
 
     Parameters
     ----------
-    mat_files : str or list of str
+    mat_files : str | pathlib.Path or list of str | pathlib.Path
         Path(s) to PsPM MAT file(s). A single string is treated as a list
         with one element.
 
@@ -83,8 +85,11 @@ def read_pspm_files(
     >>> result.df.head()
     """
 
-    if isinstance(mat_files, str):
+    if isinstance(mat_files, (str, Path)):
         mat_files = [mat_files]
+
+    # ensure everything is Path (or str if you prefer)
+    mat_files = [Path(f) for f in mat_files]
 
     physio_df = []
     srs = []
@@ -235,40 +240,36 @@ def _build_channel_table(
 
 
 def _extract_and_resample_channels(
-        mat_file: str,
-        target_sr: Optional[int]=None
+        mat_file: Union[str, Path],
+        target_sr: Optional[int] = None
     ) -> Tuple[pd.DataFrame, int]:
     """
     Extract and resample physiological channels from a PsPM MAT file.
 
-    This function loads a PsPM MAT file, extracts required physiological
-    channels (SCR, PPG, RESP), resamples them to a common sampling rate,
-    and constructs a dataframe. If a marker channel is present, it is
-    converted into a synthetic TTL signal.
+    This function loads a PsPM MAT file, extracts physiological channels,
+    resamples them to a common sampling rate, and constructs a dataframe.
+    If a marker channel is present, it is converted into a synthetic TTL signal.
 
     Parameters
     ----------
-    mat_file : str
+    mat_file : str | pathlib.Path
         Path to the PsPM MAT file.
     target_sr : int, optional
         Target sampling rate in Hertz. If ``None``, the maximum sampling
-        rate among required channels is used.
+        rate among available non-marker channels is used.
 
     Returns
     -------
     df : pd.DataFrame
-        Dataframe containing resampled channels:
-        - ``SCR``: skin conductance response
-        - ``PPG``: photoplethysmography
-        - ``RESP``: respiration
-        - ``TTL``: synthetic trigger signal
+        Dataframe containing all available resampled channels. A ``TTL``
+        column is added only if a marker channel is present.
     target_sr : int
         Sampling rate used for all output channels.
 
     Raises
     ------
     ValueError
-        If required channels (``scr``, ``ppg``, ``resp``) are missing.
+        If no non-marker channels are found.
 
     Notes
     -----
@@ -276,13 +277,9 @@ def _extract_and_resample_channels(
     - Resampling is performed using `resample_poly` when necessary.
     - Output signals are trimmed to a common duration across channels.
     - Marker channels (if present) are converted to TTL using `_onsets_to_ttl`.
-
-    Examples
-    --------
-    >>> df, sr = _extract_and_resample_channels("subject.mat")
-    >>> df.head()
     """
 
+    mat_file = Path(mat_file)
     mat = sio.loadmat(
         mat_file,
         squeeze_me=True,
@@ -294,61 +291,61 @@ def _extract_and_resample_channels(
     extracted = {}
     srs = {}
 
-    logger.debug(f"Found {len(channels)} in {mat_file}")
+    logger.debug(f"Found {len(channels)} channels in {mat_file}")
     for ch in channels:
         chantype = getattr(ch.header, "chantype", None)
-        sr = int(getattr(ch.header, "sr", None))
+        sr = getattr(ch.header, "sr", None)
+
+        if chantype is None or sr is None:
+            continue
+
         data = np.asarray(ch.data, dtype=np.float64).squeeze()
-
         extracted[chantype] = data
-        srs[chantype] = sr
+        srs[chantype] = int(sr)
 
-    required = ["scr", "ppg", "resp"]
-    missing = [c for c in required if c not in extracted]
-    if missing:
-        raise ValueError(f"Missing required channels: {missing}")
+    # Use all available non-marker channels as signal channels
+    signal_channels = [c for c in extracted if c != "marker"]
+
+    if not signal_channels:
+        raise ValueError("No physiological channels found in MAT file.")
 
     if target_sr is None:
-        target_sr = max(srs[c] for c in required)
+        target_sr = max(srs[c] for c in signal_channels)
 
     logger.debug(f"Target SamplingFrequency={target_sr}")
-    duration_s = min(len(extracted[c]) / srs[c] for c in required)
+
+    duration_s = min(len(extracted[c]) / srs[c] for c in signal_channels)
     target_len = int(round(duration_s * target_sr))
 
     def _resample_to_target(x, sr):
         x = np.asarray(x, dtype=np.float64).squeeze()
 
         if sr == target_sr:
-            logger.debug(f"Source SamplingFrequency ({sr}) matches target ({target_sr}) -> do nothing")
+            logger.debug(
+                f"Source SamplingFrequency ({sr}) matches target ({target_sr}) -> do nothing"
+            )
             y = x.copy()
         else:
-            logger.debug(f"Resampling channel to {target_sr}")            
+            logger.debug(f"Resampling channel from {sr} to {target_sr}")
             y = resample_poly(x, up=target_sr, down=sr)
 
         return np.asarray(y, dtype=np.float64).squeeze()[:target_len]
 
-    scr = _resample_to_target(extracted["scr"], srs["scr"])
-    ppg = _resample_to_target(extracted["ppg"], srs["ppg"])
-    resp = _resample_to_target(extracted["resp"], srs["resp"])
+    data_dict = {}
+    for chan in signal_channels:
+        data_dict[chan.upper()] = _resample_to_target(extracted[chan], srs[chan])
 
     marker = extracted.get("marker", None)
     if marker is not None:
-        logger.debug(f"Convert marker channel to synthetic TTL")
-        ttl = _onsets_to_ttl(
+        logger.debug("Convert marker channel to synthetic TTL")
+        data_dict["TTL"] = _onsets_to_ttl(
             marker,
             duration_s=duration_s,
             sr=target_sr,
             pulse_width_s=10
-        )
-    else:
-        ttl = np.zeros(target_len, dtype=int)
+        )[:target_len]
 
     logger.debug("Conversion complete")
-    df = pd.DataFrame({
-        "SCR": scr,
-        "PPG": ppg,
-        "RESP": resp,
-        "TTL": ttl[:target_len],
-    })
+    df = pd.DataFrame(data_dict)
 
     return df, target_sr
