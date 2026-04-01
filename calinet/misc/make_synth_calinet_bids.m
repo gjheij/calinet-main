@@ -123,7 +123,7 @@ function make_synth_calinet_bids(root_dir, overwrite)
     noise = noise_sd * randn(N,1);
 
     signal = scr + drift + noise;
-
+    
     %% ---- write BIDS structure ----
     ses_dir    = fullfile(root_dir, "sub-" + sub);
     physio_dir = fullfile(ses_dir, "physio");
@@ -147,16 +147,20 @@ function make_synth_calinet_bids(root_dir, overwrite)
     write_json(fullfile(root_dir,"participants.json"), pj);
 
     %% ---- physio TSV (gzipped) ----
+    timestamp = (0:numel(signal)-1)' / sr;   % seconds, starts at 0
+    scr_table = [timestamp, signal];
+    
     scr_tsv = fullfile(physio_dir, sprintf("%s_recording-scr_physio.tsv", base));
     fid = fopen(scr_tsv, "w");
-    fprintf(fid, "%.8f\n", signal);
+    fprintf(fid, "%.8f\t%.8f\n", scr_table.');   % timestamp \t scr
     fclose(fid);
+    
     gzip(scr_tsv);
     delete(scr_tsv);
 
     %% ---- physio JSON ----
     scr_json = struct();
-    scr_json.Columns = 'scr';
+    scr_json.Columns = {'timestamp', 'scr'};
     scr_json.Manufacturer = "Synthetic";
     scr_json.ManufacturersModelName = "N/A";
     scr_json.DeviceSerialNumber = "N/A";
@@ -164,15 +168,21 @@ function make_synth_calinet_bids(root_dir, overwrite)
     scr_json.SoftwareVersion = "N/A";
     scr_json.StartTime = 0;
     scr_json.PhysioType = "generic";
+    
+    scr_json.timestamp = struct( ...
+        "LongName", "Time", ...
+        "Description", "a continuously increasing identifier of the sampling time registered by the device", ...
+        "Origin", "System startup", ...
+        "Units", "s" ...
+    );
+    
     scr_json.scr = struct( ...
         "Description", "Synthetic SCR Recording", ...
-        "SCRCouplerType", "N/A", ...
-        "SCRCouplerVoltage", "N/A", ...
-        "SensorPosition", struct( ...
-            "SensorPositionCoarse","thenar", ...
-            "SensorPositionDetails","N/A" ...
-        ), ...
-        "Units", "microsiemens" ...
+        "SCRCouplerType", [], ...
+        "SCRCouplerVoltage", [], ...
+        "Placement", [], ...
+        "Units", "uS", ...
+        "MeasureType", "EDA-total" ...
     );
 
     write_json(strrep(scr_tsv, ".tsv", ".json"), scr_json);
@@ -181,20 +191,26 @@ function make_synth_calinet_bids(root_dir, overwrite)
     % Acquisition events
     onset_acq = [csm_on; cspu_on; cspr_on; usp_on];
 
-    duration_acq = [cs_dur*ones(size(csm_on));
-                    cs_dur*ones(size(cspu_on));
-                    cs_dur*ones(size(cspr_on));
-                    us_dur*ones(size(usp_on))];
+    duration_acq = [
+        cs_dur*ones(size(csm_on));
+        cs_dur*ones(size(cspu_on));
+        cs_dur*ones(size(cspr_on));
+        us_dur*ones(size(usp_on))
+    ];
 
-    event_type_acq = [repmat("CSm",  numel(csm_on), 1);
-                      repmat("CSpu", numel(cspu_on),1);
-                      repmat("CSpr", numel(cspr_on),1);
-                      repmat("USp",  numel(usp_on), 1)];
+    event_type_acq = [
+        repmat("CSm",  numel(csm_on), 1);
+        repmat("CSpu", numel(cspu_on),1);
+        repmat("CSpr", numel(cspr_on),1);
+        repmat("USp",  numel(usp_on), 1)
+    ];
 
-    stim_acq = [repmat("square",  numel(csm_on), 1);
-                repmat("diamond", numel(cspu_on),1);
-                repmat("diamond", numel(cspr_on),1);
-                repmat("shock",   numel(usp_on), 1)];
+    stim_acq = [
+        repmat("square",  numel(csm_on), 1);
+        repmat("diamond", numel(cspu_on),1);
+        repmat("diamond", numel(cspr_on),1);
+        repmat("shock",   numel(usp_on), 1)
+    ];
 
     task_acq = repmat("acquisition", numel(onset_acq), 1);
 
@@ -238,7 +254,8 @@ function make_synth_calinet_bids(root_dir, overwrite)
     write_json(fullfile(physio_dir, sprintf("%s_events.json", base)), evj);
 
     fprintf("Synthetic dataset created at %s\n", root_dir);
-
+    print_tree(root_dir);
+    
     function add_impulses(onsets, amp)
         idx = round(onsets*sr) + 1;
         idx = idx(idx>=1 & idx<=N);
@@ -257,19 +274,22 @@ function write_json(path, S)
     fclose(fid);
 end
 
-function tf = ismissing_value(val)
-% Helper to detect missing values
-    tf = false;
+function print_tree(folder, prefix)
+    if nargin < 2
+        prefix = "";
+    end
 
-    if isempty(val)
-        tf = true;
-    elseif (isnumeric(val) && isnan(val))
-        tf = true;
-    elseif isstring(val) && strlength(val) == 0
-        tf = true;
-    elseif ischar(val) && isempty(val)
-        tf = true;
-    elseif ismissing(val)
-        tf = true;
+    files = dir(folder);
+    files = files(~ismember({files.name}, {'.','..'}));
+
+    for i = 1:numel(files)
+        name = files(i).name;
+        fullpath = fullfile(folder, name);
+
+        fprintf("%s|-- %s\n", prefix, name);
+
+        if files(i).isdir
+            print_tree(fullpath, prefix + "    ");
+        end
     end
 end
