@@ -35,6 +35,7 @@ dependencies = [
     "seaborn",
     "ipython",
     "ipykernel",
+    "lazyfmri @ git+https://github.com/gjheij/lazyfmri.git"
 ]
 
 [project.optional-dependencies]
