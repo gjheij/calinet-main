@@ -74,7 +74,9 @@ def write_physio_tsv_gz_headerless(
       - gzip mtime=0
       - empty filename in gzip header
     """
+    
     out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = str(out_path) + ".tmp"
 
     with open(tmp, "wb") as raw:
