@@ -12,8 +12,12 @@ from typing import Any, Sequence, Union, Optional, Tuple, Dict, List
 import numpy as np
 import pandas as pd
 
+from lazyfmri import fitting
 from calinet.core import io as cio
+from calinet.exports.calibench import compute_retrodictive_validity
+
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -1089,7 +1093,7 @@ def pspm_trim(
     file_end = float(data_df[timestamp_col].iloc[-1])
     duration = file_end - file_start
 
-    logger.debug(f"File start: {file_start:.6f}s, end: {file_end:.6f}s, duration: {duration:.6f}s")
+    logger.debug(f"File start: {file_start:.3f}s, end: {file_end:.6f}s, duration: {duration:.6f}s")
 
     data_df["_time0"] = data_df[timestamp_col] - file_start
 
@@ -1097,7 +1101,7 @@ def pspm_trim(
         if start_time is None:
             events_df["_time0"] = events_df[event_time_col] - file_start
         else:
-            logger.info(f"StartTime={round(start_time)}s, subtracting this from onset times to align channels")
+            logger.info(f"StartTime={start_time:.3f}s, subtracting this from onset times to align channels")
             events_df["_time0"] = events_df[event_time_col] - float(start_time)
     else:
         events_df["_time0"] = pd.Series(dtype=float)
@@ -1156,7 +1160,7 @@ def pspm_trim(
     sta_time = sta_p + sta_offset
 
     if (sto_p + sto_offset) > duration:
-        logger.warning("End time outside file bounds, clipping to file end")
+        logger.warning(f"End time ({(sto_p + sto_offset):.3f}s) outside file bounds {duration:.3f}s, clipping to file end (skipping {(sto_p+sto_offset)-duration:.3f}s)")
         sto_time = duration
     else:
         sto_time = sto_p + sto_offset
@@ -1165,7 +1169,7 @@ def pspm_trim(
         raise ValueError(f"Trim interval is invalid: start={sta_time}, end={sto_time}")
 
     # Trim waveform data and shift timestamps to new origin
-    logger.info(f"Start={round(sta_time, 3)}s, end={round(sto_time, 3)}s")
+    logger.info(f"Start={sta_time:.3f}s (first onset={sta_p:.3f}s, offset={sta_offset:.3f}s), end={sto_time:.3f}s (last onset={sto_p:.3f}s, offset={sto_offset:.3f}s)")
     data_mask = (
         (data_df["_time0"] >= sta_time)
         & (data_df["_time0"] <= sto_time)
@@ -1220,3 +1224,552 @@ def pspm_trim(
         trimpoints=(sta_time, sto_time),
         duration=sto_time - sta_time,
     )
+
+
+def peak_score_epochs(
+        df: pd.DataFrame,
+        signal_col: int=0,
+        time_col: str="t",
+        group_cols: list[str]=None,
+        baseline_window: tuple[float, float]=(-1.0, 0.0),
+        peak_window: tuple[float, float]=(1.0, 4.0),
+    ) -> pd.DataFrame:
+    """
+    Compute simple peak scores for epoched data.
+
+    Score per epoch:
+        mean(signal in baseline_window) subtracted from
+        max(signal in peak_window)
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Long-format dataframe with one row per sample.
+    signal_col : str
+        Name of the signal column.
+    time_col : str
+        Name of the time column in seconds.
+    group_cols : list[str]
+        Columns defining one epoch. Defaults to:
+        ['subject', 'run', 'event_type', 'epoch']
+    baseline_window : tuple[float, float]
+        Time window for baseline mean.
+    peak_window : tuple[float, float]
+        Time window for response peak.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per epoch with baseline, peak, and score.
+    """
+    if group_cols is None:
+        group_cols = ["subject", "run", "event_type", "epoch"]
+
+    required = set(group_cols + [time_col, signal_col])
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {sorted(missing)}")
+
+    logger.debug(f"Running peak scoring: baseline={baseline_window} | peak window={peak_window}")
+
+    baseline_mask = df[time_col].between(baseline_window[0], baseline_window[1], inclusive="both")
+    peak_mask = df[time_col].between(peak_window[0], peak_window[1], inclusive="both")
+
+    baseline_df = df.loc[baseline_mask]
+    peak_df = df.loc[peak_mask]
+
+    baseline = (
+        baseline_df
+        .groupby(group_cols, dropna=False)[signal_col]
+        .mean()
+        .rename("baseline")
+    )
+
+    peak = (
+        peak_df
+        .groupby(group_cols, dropna=False)[signal_col]
+        .max()
+        .rename("peak")
+    )
+
+    out = pd.concat([baseline, peak], axis=1).reset_index()
+    out["score"] = out["peak"] - out["baseline"]
+
+    return out
+
+
+def peak_score(
+        data: Union[str, Path, pd.DataFrame, np.ndarray, List[Any]],
+        events: Union[str, Path, pd.DataFrame, np.ndarray, List[Any]],
+        data_col: str="scr",
+        events_col: str="event_type",
+        interval: List[Union[int, float]]=[-1, 10],
+        sr: Union[int, float]=1000,
+        **kwargs
+    ) -> Tuple[pd.DataFrame, Any]:
+    """
+    Compute mean peak scores for event-locked epochs grouped by event type.
+
+    This function extracts epochs from a waveform around event onsets, scores
+    each epoch using ``peak_score_epochs``, and then averages the resulting
+    scores within each event category.
+
+    Parameters
+    ----------
+    data : str, pathlib.Path, pandas.DataFrame, numpy.ndarray, or list
+        Waveform data to epoch. Supported inputs are:
+
+        - a path to a tabular file readable by ``_read_tsv_any``
+        - a DataFrame containing the signal column specified by ``data_col``
+        - a NumPy array of waveform values
+        - a list of waveform values
+
+        If a file path is provided, the column named by ``data_col`` is read
+        and converted to a NumPy array. If a DataFrame is provided, only
+        ``data_col`` is used. Array-like inputs are copied before processing.
+    events : str, pathlib.Path, pandas.DataFrame, numpy.ndarray, or list
+        Event information used to define epochs. Supported inputs are:
+
+        - a path to a tabular file readable by ``_read_tsv_any``
+        - a DataFrame of event information
+        - a NumPy array of event values
+        - a list of event values
+
+        If a file path is provided, it is loaded with ``_read_tsv_any``. If a
+        list is provided, it is converted to a NumPy array. Other supported
+        objects are copied before use.
+    data_col : str, default="scr"
+        Column in ``data`` containing the waveform to score when ``data`` is a
+        DataFrame or file path.
+    events_col : str, default="event_type"
+        Column in the scored epoch dataframe used to group scores during
+        aggregation.
+    interval : list of int or float, default=[-1, 10]
+        Time window in seconds around each event used for epoch extraction,
+        given as ``[start, end]`` relative to event onset.
+    sr : int or float, default=1000
+        Sampling rate of ``data`` in Hz. The epoching step uses ``TR=1/sr``.
+    **kwargs
+        Additional keyword arguments passed directly to
+        ``peak_score_epochs``.
+
+    Returns
+    -------
+    aggr : pandas.DataFrame
+        Aggregated mean scores by event type. The returned dataframe contains
+        ``events_col`` and ``score`` columns.
+    res : Any
+        Epoching result returned by ``fitting.Epoch``. This object includes the
+        extracted epoch dataframe as ``res.df_epoch`` and may provide
+        additional metadata from the epoching step.
+
+    Raises
+    ------
+    KeyError
+        Raised if ``data_col`` is missing from a DataFrame or loaded data, or
+        if ``events_col`` is missing from the scored epoch dataframe.
+    ZeroDivisionError
+        Raised if ``sr`` is zero.
+    TypeError
+        Raised if downstream epoching or scoring functions reject the provided
+        input types or keyword arguments.
+    ValueError
+        Raised if epoch extraction or peak scoring fails because the interval,
+        events, or data are invalid.
+
+    Notes
+    -----
+    This function is a thin wrapper around two processing steps:
+
+    1. ``fitting.Epoch`` extracts event-locked segments from the waveform.
+    2. ``peak_score_epochs`` computes a score for each extracted epoch.
+
+    After scoring, the function groups rows by ``events_col`` and computes the
+    mean of the ``score`` column.
+
+    The waveform signal is always converted to a NumPy array before epoching.
+    Depending on the input type, event data may remain as a DataFrame or be
+    converted to a NumPy array.
+
+    Progress information is emitted through the module logger, including epoch
+    extraction settings and aggregation status.
+
+    Examples
+    --------
+    Compute scores from a waveform array and a matching event dataframe.
+
+    >>> signal = np.random.randn(5000)
+    >>> events = pd.DataFrame({
+    ...     "onset": [1.0, 3.0],
+    ...     "event_type": ["cue", "cue"]
+    ... })
+    >>> aggr, res = peak_score(signal, events, sr=1000, interval=[-1, 4])
+    >>> "score" in aggr.columns
+    True
+
+    Use DataFrame input and select the waveform column explicitly.
+
+    >>> data = pd.DataFrame({
+    ...     "scr": np.random.randn(5000),
+    ...     "other": np.random.randn(5000)
+    ... })
+    >>> events = pd.DataFrame({
+    ...     "onset": [0.5, 2.5, 4.0],
+    ...     "event_type": ["a", "b", "a"]
+    ... })
+    >>> aggr, _ = peak_score(data, events, data_col="scr", sr=1000)
+    >>> sorted(aggr["event_type"].tolist())
+    ['a', 'b']
+
+    Load waveform and events from files.
+
+    >>> aggr, res = peak_score(
+    ...     "physio.tsv",
+    ...     "events.tsv",
+    ...     data_col="scr",
+    ...     events_col="event_type",
+    ...     interval=[-1, 10],
+    ...     sr=1000
+    ... )
+
+    Pass scoring options through to ``peak_score_epochs``.
+
+    >>> aggr, res = peak_score(
+    ...     signal,
+    ...     events,
+    ...     sr=1000,
+    ...     interval=[0, 6]
+    ... )
+    """
+
+    if isinstance(data, (str, Path)):
+        df = _read_tsv_any(data)
+        df = df[data_col].to_numpy()
+    elif isinstance(data, pd.DataFrame):
+        df = data[data_col].to_numpy()
+    else:
+        df = data.copy()
+
+    if isinstance(events, (str, Path)):
+        events = _read_tsv_any(events)
+    elif isinstance(events, list):
+        events = np.array(events)
+    else:
+        events = events.copy()
+
+    # epoch data
+    logger.debug(f"Extracting epochs: interval={interval} | TR={1/sr}")
+    res = fitting.Epoch(
+        df,
+        events,
+        TR=1/sr,
+        interval=interval
+    )
+
+    df_epoch = res.df_epoch.copy()
+
+    res_peak = peak_score_epochs(
+        df_epoch.reset_index(),
+        **kwargs
+    )
+
+    logger.debug("Aggregating scores")
+    aggr = (
+        res_peak
+        .groupby([events_col], as_index=False)["score"]
+        .mean()
+    )
+
+    return aggr, res
+
+
+def peak_score_lab(
+        lab_name: str,
+        root_path: Union[str, Path]=r"Z:\CALINET2\converted",
+        task_name: str="acquisition",
+        modality: str="scr",
+        **kwargs
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Compute peak scores for all subjects in a lab-level project directory.
+
+    This function searches a lab folder for subject directories, loads the
+    corresponding physiology, event, and JSON sidecar files for each subject,
+    computes event-locked peak scores using ``peak_score``, and concatenates
+    subject-level outputs into lab-level summary tables.
+
+    Parameters
+    ----------
+    lab_name : str
+        Name of the lab or project folder located under ``root_path``.
+    root_path : str or pathlib.Path, default="Z:\\CALINET2\\converted"
+        Root directory containing lab-level folders organized in a
+        BIDS-like structure. The function expects subject folders named
+        ``sub-*`` inside ``root_path / lab_name``.
+    task_name : str, default="acquisition"
+        Task identifier used to locate physiology files. Files are matched
+        using the pattern
+        ``*task-{task_name}*{modality}_physio.tsv.gz``.
+    modality : str, default="scr"
+        Signal modality string used in the physiology filename pattern.
+        Typical examples include ``"scr"``.
+    **kwargs
+        Additional keyword arguments passed directly to ``peak_score`` for
+        subject-level scoring.
+
+    Returns
+    -------
+    df_peaks : pandas.DataFrame
+        Concatenated peak-score summary across all subjects. This dataframe
+        contains the aggregated output returned by ``peak_score`` for each
+        subject, with an added ``subject`` column.
+    df_epochs : pandas.DataFrame
+        Concatenated epoch-level dataframe across all subjects. This is built
+        from ``res.df_epoch`` returned by ``peak_score`` for each subject,
+        with an added ``subject`` column while preserving the original epoch
+        index structure.
+
+    Raises
+    ------
+    FileNotFoundError
+        Raised if expected physiology, event, or JSON sidecar files cannot be
+        located for one or more subjects.
+    IndexError
+        Raised if no physiology file matches the expected filename pattern for
+        a subject, because the first match is accessed directly.
+    TypeError
+        Raised if downstream functions reject the provided argument types.
+    ValueError
+        Raised if physiology metadata, event data, or scoring inputs are
+        invalid for ``peak_score``.
+    KeyError
+        Raised if required metadata such as ``SamplingFrequency`` is missing
+        or if expected columns are absent in downstream processing.
+
+    Notes
+    -----
+    This function assumes a directory layout in which each subject directory
+    contains a ``physio`` subfolder and physiology files with BIDS-like names.
+
+    For each subject, the function:
+
+    1. finds the matching physiology file
+    2. resolves the corresponding events file
+    3. infers and loads the JSON sidecar
+    4. reads ``SamplingFrequency`` from the JSON metadata
+    5. calls ``peak_score`` with the discovered files and additional keyword
+       arguments
+
+    The resulting aggregated peak scores are combined row-wise with
+    ``pandas.concat``. Epoch-level outputs are also concatenated after adding
+    a ``subject`` column and restoring the original epoch index names.
+
+    Progress, discovered paths, and sampling frequency information are logged
+    through the module logger.
+
+    Examples
+    --------
+    Compute lab-level peak scores using the default task and modality.
+
+    >>> df_peaks, df_epochs = peak_score_lab("LabA")
+    >>> "subject" in df_peaks.columns
+    True
+
+    Use a custom root directory.
+
+    >>> df_peaks, df_epochs = peak_score_lab(
+    ...     lab_name="LabA",
+    ...     root_path="/data/converted"
+    ... )
+    >>> isinstance(df_epochs, pd.DataFrame)
+    True
+
+    Score a different task.
+
+    >>> df_peaks, df_epochs = peak_score_lab(
+    ...     lab_name="LabA",
+    ...     task_name="conditioning"
+    ... )
+
+    Pass scoring parameters through to ``peak_score``.
+
+    >>> df_peaks, df_epochs = peak_score_lab(
+    ...     lab_name="LabA",
+    ...     interval=[-1, 8]
+    ... )
+    """
+
+    root_path = Path(root_path)
+    proj_path = root_path / lab_name
+    logger.info(f"Input path: {proj_path}")
+    subject_list = list(proj_path.glob('sub-*'))
+    logger.info(f"Found {len(subject_list)} subjects")
+
+    df_peaks = []
+    df_epochs = []
+    logger.info("Start peak-scoring")
+    for sub in subject_list:
+        phys_path = sub / 'physio'
+        scr_file = list(phys_path.glob(f"*task-{task_name}*{modality}_physio.tsv.gz"))[0]
+        ev_file = _find_task_events_file(scr_file)
+        json_file = cio.infer_json_sidecar(scr_file)
+        logger.debug(f"SCR:\t{scr_file}")
+        logger.debug(f"Events:\t{ev_file}")
+
+        sr = cio.load_json(json_file).get("SamplingFrequency")
+        logger.debug(f"SR:\t{sr}")
+        ps, res = peak_score(
+            scr_file,
+            ev_file,
+            sr=int(sr),
+            **kwargs
+        )
+
+        ps["subject"] = sub.stem
+        df_peaks.append(ps)
+        
+        idx = list(res.df_epoch.index.names)
+        df_e = res.df_epoch.reset_index()
+        df_e['subject'] = sub.stem
+        df_e.set_index(idx, inplace=True)
+        df_epochs.append(df_e)
+
+    df_peaks = pd.concat(df_peaks)
+    df_epochs = pd.concat(df_epochs)
+    df_peaks.head()    
+
+    logger.info("Done")
+    return df_peaks, df_epochs
+
+
+def rv_lab(
+        df: pd.DataFrame,
+        compare_events: List[Any]=["CSpu", "CSm"],
+        event_col: str="event_type",
+        score_col: str="score",
+        subject_col: str="subject"
+    ) -> Tuple[float, pd.DataFrame]:
+    """
+    Compute retrodictive validity from lab-level peak-score output.
+
+    This function selects two event categories from a peak-score summary table,
+    assigns intended values to those categories, and computes retrodictive
+    validity across subjects using ``compute_retrodictive_validity``.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Peak-score summary dataframe, typically the ``df_peaks`` output from
+        ``peak_score_lab``. The dataframe must contain at least the event,
+        score, and subject columns specified by ``event_col``, ``score_col``,
+        and ``subject_col``.
+    compare_events : list, default=["CSpu", "CSm"]
+        Two event labels to compare. The first label is assigned intended value
+        ``1`` and the second label is assigned intended value ``0``.
+    event_col : str, default="event_type"
+        Column in ``df`` containing event labels.
+    score_col : str, default="score"
+        Column in ``df`` containing the peak scores used to compute
+        retrodictive validity.
+    subject_col : str, default="subject"
+        Column in ``df`` identifying subjects.
+
+    Returns
+    -------
+    r : float
+        Retrodictive validity coefficient returned by
+        ``compute_retrodictive_validity``.
+    df_cs : pandas.DataFrame
+        Filtered dataframe containing only rows for the selected
+        ``compare_events``. An additional column, ``intended_value``, is added
+        with values mapped from the event labels.
+
+    Raises
+    ------
+    KeyError
+        Raised if ``event_col``, ``score_col``, or ``subject_col`` is missing
+        from ``df``.
+    IndexError
+        Raised if ``compare_events`` does not contain at least two elements.
+    TypeError
+        Raised if downstream validity computation rejects the provided data
+        types.
+    ValueError
+        Raised if the filtered data are insufficient or otherwise invalid for
+        ``compute_retrodictive_validity``.
+
+    Notes
+    -----
+    This function is intended for use with aggregated subject-level peak-score
+    output, not raw epoch-level data.
+
+    The mapping of intended values is defined as:
+
+    - ``compare_events[0]`` -> ``1``
+    - ``compare_events[1]`` -> ``0``
+
+    Only rows whose event label is present in ``compare_events`` are retained.
+    The filtered dataframe is reset to a default integer index before
+    retrodictive validity is computed.
+
+    This function logs the intended score mapping and the final retrodictive
+    validity value through the module logger.
+
+    Examples
+    --------
+    Compute retrodictive validity using the default event comparison.
+
+    >>> df_peaks = pd.DataFrame({
+    ...     "event_type": ["CSpu", "CSm", "CSpu", "CSm"],
+    ...     "score": [0.8, 0.2, 0.7, 0.1],
+    ...     "subject": ["sub-01", "sub-01", "sub-02", "sub-02"]
+    ... })
+    >>> r, df_cs = rv_lab(df_peaks)
+    >>> "intended_value" in df_cs.columns
+    True
+
+    Use custom event labels.
+
+    >>> df_peaks = pd.DataFrame({
+    ...     "event_type": ["CSplus", "CSminus", "CSplus", "CSminus"],
+    ...     "score": [1.1, 0.4, 0.9, 0.3],
+    ...     "subject": ["sub-01", "sub-01", "sub-02", "sub-02"]
+    ... })
+    >>> r, df_cs = rv_lab(
+    ...     df_peaks,
+    ...     compare_events=["CSplus", "CSminus"]
+    ... )
+
+    Use non-default column names.
+
+    >>> df_peaks = pd.DataFrame({
+    ...     "condition": ["CSpu", "CSm", "CSpu", "CSm"],
+    ...     "peak": [0.5, 0.2, 0.6, 0.1],
+    ...     "participant": ["sub-01", "sub-01", "sub-02", "sub-02"]
+    ... })
+    >>> r, df_cs = rv_lab(
+    ...     df_peaks,
+    ...     event_col="condition",
+    ...     score_col="peak",
+    ...     subject_col="participant"
+    ... )
+    """
+
+    intended_scores = {
+        compare_events[0]: 1,
+        compare_events[1]: 0
+    }
+
+    logger.info(f"Computing RV with: {intended_scores}")
+
+    df_cs = df.loc[df[event_col].isin(compare_events)]
+    df_cs["intended_value"] = df_cs[event_col].map(intended_scores)
+    df_cs.reset_index(drop=True, inplace=True)
+
+    r = compute_retrodictive_validity(
+        df_cs,
+        score_col=score_col,
+        subject_col=subject_col
+    )
+    logger.info(f"RV = {r:.3f}")
+    return r, df_cs
