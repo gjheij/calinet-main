@@ -42,9 +42,15 @@ def parse_events_csv(
         "us",
         "cs_img",
         "cs_duration",
-        "task",
-        "cs_onset"
+        "task"
     ]
+
+    if "cs_onset" in list(events_df.columns):
+        ref_event = "cs_onset"
+        column_list += ["cs_onset"]
+    else:
+        # Ams doesn't have 'cs_onset' -> use duration to filter ev's
+        ref_event = "cs_duration"
 
     if task_name == "acquisition":
         column_list += ["shock_begin", "shock_end"]
@@ -52,7 +58,7 @@ def parse_events_csv(
     # filter events
     events_df = (
         events_df[column_list]
-        .dropna(subset=["cs_onset"])
+        .dropna(subset=[ref_event])
         .loc[lambda df: df["trial_type"].str.contains("CS", na=False)]
     )
 
