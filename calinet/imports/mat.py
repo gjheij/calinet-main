@@ -27,30 +27,31 @@ class MatReadResult:
 
 
 def read_mat_file(
-        mat_file: str,
-        *,
-        data_key: str = "data",
-        scr_channel: int = 2,
-        ttl_channel: int = 3,
-        sampling_rate_hz: float = 1000.0,
-        ttl_pulse_width_s: float = 0.01,
-        min_peak_distance_s: float = 0.5,
-        low_percentile: float = 60.0,
-        high_percentile: float = 95.0,
-    ) -> MatReadResult:
+    mat_file: str,
+    *,
+    ecg_channel: str = "ECG",
+    scr_channel: str = "SCL",
+    ttl_channel: str = "marker",
+    sampling_rate_hz: float = 1000.0,
+    ttl_pulse_width_s: float = 0.01,
+    min_peak_distance_s: float = 0.5,
+    low_percentile: float = 60.0,
+    high_percentile: float = 95.0,
+) -> MatReadResult:
     """
-    Read a simple MAT file where channel 1 is SCR and channel 2 is TTL.
+    Read a MAT file where signals are stored as separate variables,
+    e.g. 'ECG', 'SCL', and 'marker'.
 
     Parameters
     ----------
     mat_file
         Path to the .mat file.
-    data_key
-        Variable name inside the MAT file. Defaults to "data".
+    ecg_channel
+        Variable name for the ECG signal.
     scr_channel
-        1-based column index for the SCR channel.
+        Variable name for the SCR/SCL signal.
     ttl_channel
-        1-based column index for the TTL channel.
+        Variable name for the TTL/marker signal.
     sampling_rate_hz
         Sampling rate in Hz.
     ttl_pulse_width_s
@@ -59,7 +60,6 @@ def read_mat_file(
         Minimum distance between TTL peaks in seconds.
     low_percentile, high_percentile
         Percentile band used to keep "medium-high" TTL peaks.
-        Example: 60..95 keeps stronger peaks but discards tiny and extreme outliers.
 
     Returns
     -------
@@ -70,34 +70,39 @@ def read_mat_file(
     mat = sio.loadmat(
         mat_file,
         squeeze_me=True,
-        struct_as_record=False
+        struct_as_record=False,
     )
 
     logger.debug(f"Available keys in MAT file: {list(mat.keys())}")
 
-    if data_key not in mat:
-        raise KeyError(f"'{data_key}' not found in {mat_file}. Keys: {list(mat.keys())}")
-
-    data = np.asarray(mat[data_key], dtype=np.float64)
-    logger.info(f"Loaded data with shape: {data.shape}")
-
-    if data.ndim != 2:
-        raise ValueError(f"Expected a 2D array in '{data_key}', got shape {data.shape}")
-
-    scr_idx = scr_channel - 1
-    ttl_idx = ttl_channel - 1
-
-    logger.info(f"Using SCR channel={scr_channel} (idx={scr_idx}), TTL channel={ttl_channel} (idx={ttl_idx})")
-
-    if scr_idx >= data.shape[1] or ttl_idx >= data.shape[1]:
-        raise IndexError(
-            f"Requested channels SCR={scr_channel}, TTL={ttl_channel}, "
-            f"but data only has {data.shape[1]} columns"
+    required_keys = [ecg_channel, scr_channel, ttl_channel]
+    missing = [k for k in required_keys if k not in mat]
+    if missing:
+        raise KeyError(
+            f"Missing required keys in {mat_file}: {missing}. "
+            f"Available keys: {list(mat.keys())}"
         )
 
-    scr = np.asarray(data[:, scr_idx], dtype=np.float64).squeeze()
-    ttl_raw = np.asarray(data[:, ttl_idx], dtype=np.float64).squeeze()
+    ecg = np.asarray(mat[ecg_channel], dtype=np.float64).squeeze()
+    scr = np.asarray(mat[scr_channel], dtype=np.float64).squeeze()
+    ttl_raw = np.asarray(mat[ttl_channel], dtype=np.float64).squeeze()
 
+    logger.info(
+        f"Loaded signals: ECG shape={ecg.shape}, SCR shape={scr.shape}, TTL shape={ttl_raw.shape}"
+    )
+
+    for name, arr in [("ECG", ecg), ("SCR", scr), ("TTL", ttl_raw)]:
+        if arr.ndim != 1:
+            raise ValueError(f"{name} signal must be 1D after squeeze(), got shape {arr.shape}")
+
+    n_samples = len(scr)
+    if len(ecg) != n_samples or len(ttl_raw) != n_samples:
+        raise ValueError(
+            f"Signal lengths do not match: "
+            f"ECG={len(ecg)}, SCR={len(scr)}, TTL={len(ttl_raw)}"
+        )
+
+    logger.debug(f"ECG stats: min={np.min(ecg):.3f}, max={np.max(ecg):.3f}")
     logger.debug(f"SCR stats: min={np.min(scr):.3f}, max={np.max(scr):.3f}")
     logger.debug(f"TTL raw stats: min={np.min(ttl_raw):.3f}, max={np.max(ttl_raw):.3f}")
 
@@ -115,18 +120,20 @@ def read_mat_file(
 
     ttl_selected = _peaks_to_ttl(
         peak_indices,
-        n_samples=len(ttl_raw),
+        n_samples=n_samples,
         sampling_rate_hz=sampling_rate_hz,
         pulse_width_s=ttl_pulse_width_s,
         pulse_amplitude=5,
     )
 
     logger.debug(f"Constructed TTL signal with {np.sum(ttl_selected > 0)} active samples")
-    time_s = np.arange(len(scr), dtype=np.float64) / float(sampling_rate_hz)
+
+    time_s = np.arange(n_samples, dtype=np.float64) / float(sampling_rate_hz)
 
     df = pd.DataFrame(
         {
             "time_s": time_s,
+            "ECG": ecg,
             "SCR": scr,
             "TTL_raw": ttl_raw,
             "TTL": ttl_selected,
@@ -200,7 +207,11 @@ def _select_medium_high_peaks(
     min_distance_samples = max(1, int(round(min_peak_distance_s * sampling_rate_hz)))
     logger.debug(f"Minimum peak distance (samples): {min_distance_samples}")
 
-    peak_indices, properties = find_peaks(ttl_raw, height=0, distance=min_distance_samples)
+    peak_indices, properties = find_peaks(
+        ttl_raw,
+        height=0,
+        distance=min_distance_samples
+    )
 
     logger.info(f"Total detected peaks: {len(peak_indices)}")
 
