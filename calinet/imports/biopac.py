@@ -209,6 +209,10 @@ def _select_channel_indices(acq, selectors: Dict[str, ChannelSelector]) -> Dict[
     return out
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def read_acq_file(
         path: str,
         channels: Optional[Dict[str, ChannelSelector]] = None,
@@ -245,54 +249,86 @@ def read_acq_file(
     BiopacReadResult(df, sampling_rate_hz, channel_info)
     """
 
+    logger.info(f"Reading BIOPAC file from: {path}")
     acq = bioread.read_file(path)
+
+    logger.debug(f"Loaded file with {len(acq.channels)} channels")
+
     channel_info = _build_channel_table(acq)
+    channel_srs = channel_info['samples_per_second'].tolist()
 
     # Choose which channels to load
     if channels is None:
-        # Load all channels, name them by file channel name (fallback to ch{idx})
+        logger.info("No channel selection provided → loading all channels")
+
         data = {}
         for i, ch in enumerate(acq.channels):
             name = (getattr(ch, "name", None) or f"ch{i}").strip()
             data[name] = _to_native_endian(ch.data)
+
+        if np.unique(channel_srs).shape[0]>1:
+            raise ValueError(f"Found different sampling rates in channels: {np.unique(channel_srs)}. Cannot combine in single dataframe")
+        
         df = pd.DataFrame(data)
         selected_idx_map = {col: i for i, col in enumerate(df.columns)}
+
+        logger.debug(f"Loaded channels: {list(df.columns)}")
+
     else:
+        logger.info(f"Selecting channels using mapping: {channels}")
+
         idx_map = _select_channel_indices(acq, channels)
+        idx_list = list(idx_map.values())
         selected_idx_map = idx_map
-        data = {out_name: _to_native_endian(acq.channels[idx].data) for out_name, idx in idx_map.items()}
+
+        logger.debug(f"Resolved channel indices: {idx_map}")
+
+        channel_srs = [channel_srs[i] for i in idx_list]
+        logger.debug(f"Available sampling rates: {channel_srs}")
+        if np.unique(channel_srs).shape[0]>1:
+            raise ValueError(f"Found different sampling rates in channels: {np.unique(channel_srs)}. Cannot combine in single dataframe")
+        
+        data = {
+            out_name: _to_native_endian(acq.channels[idx].data)
+            for out_name, idx in idx_map.items()
+        }
 
         if keep_unmapped:
+            logger.info("keep_unmapped=True → including remaining channels")
+
             used = set(idx_map.values())
             for i, ch in enumerate(acq.channels):
                 if i in used:
                     continue
+
                 name = (getattr(ch, "name", None) or f"ch{i}").strip()
-                # avoid overwriting
+
                 if name in data:
                     name = f"{name}__ch{i}"
-                data[name] = _to_native_endian(ch.data)
 
+                data[name] = _to_native_endian(ch.data)
+        
         df = pd.DataFrame(data)
 
-    # Sampling rate: BIOPAC can have per-channel rates; fall back to file attribute if present
-    sr = getattr(acq, "samples_per_second", None)
-    if sr is None:
-        # If missing, try to infer from first channel
-        sr = getattr(acq.channels[0], "samples_per_second", None)
+        logger.debug(f"Final columns after selection: {list(df.columns)}")
 
-    # Optional renames/drops
+    # Sampling rate
+    sr = channel_srs[0]
+    logger.info(f"Sampling rate resolved: {sr} Hz")
+
+    # Optional renames
     if rename:
+        logger.info(f"Renaming columns: {rename}")
         df = df.rename(columns=rename)
 
     selected_channel_info = channel_info.copy()
 
     if selected_idx_map is not None and channels is not None:
-        # filter to chosen indices
         wanted = set(selected_idx_map.values())
-        selected_channel_info = selected_channel_info[selected_channel_info["index"].isin(wanted)].copy()
+        selected_channel_info = selected_channel_info[
+            selected_channel_info["index"].isin(wanted)
+        ].copy()
 
-        # add output column name to show mapping
         inv = {}
         for out_name, idx in selected_idx_map.items():
             inv.setdefault(idx, []).append(out_name)
@@ -301,8 +337,13 @@ def read_acq_file(
             lambda i: ",".join(inv.get(i, []))
         )
 
-        # nice ordering
-        selected_channel_info = selected_channel_info.sort_values(["output_name", "index"])
+        selected_channel_info = selected_channel_info.sort_values(
+            ["output_name", "index"]
+        )
+
+        logger.debug("Constructed selected_channel_info table")
+
+    logger.info("Finished reading BIOPAC file")
 
     return BiopacReadResult(
         df=df,
