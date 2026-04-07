@@ -44,7 +44,9 @@ META_DICT = {
 
 def split_onsets(
         event_onsets: list,
-        sessions: list
+        sessions: list,
+        gap_bias: float=0.6,
+        min_pre_second_block: float=10.0,        
     ) -> tuple:
     """
     Split event onsets into session-specific groups and realign timing.
@@ -61,6 +63,13 @@ def split_onsets(
     sessions : list of str
         List containing exactly two session identifiers (e.g., ["acquisition", "extinction"]).
         The first session is assumed to occur earlier in time.
+    gap_bias : float, default=0.75
+        Where to place the new start time inside the inter-session gap.
+        0.5 = middle of the gap
+        >0.5 = gives more leeway to the end of the first block.
+    min_pre_second_block : float, default=10.0
+        Minimum number of seconds that must remain between the computed
+        second-session start time and the first onset of the second block.
 
     Returns
     -------
@@ -75,7 +84,7 @@ def split_onsets(
     -----
     The function operates as follows:
 
-    1. Computes the mean difference between consecutive onsets:
+    1. Computes the typical difference between consecutive onsets:
        ``mean_diff = mean(diff(event_onsets))``
 
     2. Iterates through onsets and assigns them to the first session until a
@@ -86,10 +95,17 @@ def split_onsets(
     4. Computes the temporal gap between sessions:
        ``session_time_diff = first_extinction_onset - last_acquisition_onset``
 
-    5. Estimates a new start time for the second session:
-       ``extinction_ses_new_start = last_acquisition_onset + mean_diff / 2``
+    5. Estimates a new start time for the second session by placing it within
+       the inter-session gap using a bias factor:
+       ``biased_start = last_acquisition_onset + gap_bias * session_time_diff``
+       where ``gap_bias > 0.5`` favors more leeway at the end of the first session.
 
-    6. Shifts second-session onsets relative to the new start time.
+    6. Applies a safeguard to ensure a minimum temporal buffer before the
+       second session:
+       ``extinction_ses_new_start = min(biased_start,
+                                       first_extinction_onset - min_pre_second_block)``
+
+    7. Shifts second-session onsets relative to the new start time.
 
     Assumptions:
         - `event_onsets` are ordered
@@ -107,60 +123,95 @@ def split_onsets(
         "extinction": [...]
     })
     """
+    if len(sessions) != 2:
+        raise ValueError("`sessions` must contain exactly two session names.")
+    if not 0 <= gap_bias <= 1:
+        raise ValueError("`gap_bias` must be between 0 and 1.")
+    if min_pre_second_block < 0:
+        raise ValueError("`min_pre_second_block` must be >= 0.")
+    if len(event_onsets) < 2:
+        raise ValueError("Need at least two onsets to split sessions.")
 
-    session_onsets = {}
-    for key in sessions:
-        session_onsets[key] = []
+    session_onsets = {key: [] for key in sessions}
 
-    # Calculate the mean of the difference between two adjacent onsets
     onset_diffs = [
         round(event_onsets[i] - event_onsets[i - 1], 3)
         for i in range(1, len(event_onsets))
     ]
-    mean_diff = sum(onset_diffs) / len(onset_diffs)
-    mean_diff = round(mean_diff, 3)
+    mean_diff = round(sum(onset_diffs) / len(onset_diffs), 3)
 
     last_onset = event_onsets[0]
-    extinction_events_first_index = 0
+    extinction_events_first_index = None
+
     for i, onset in enumerate(event_onsets):
         onset_diff = onset - last_onset
-        if onset_diff < mean_diff + cs_duration:
+
+        if i == 0 or onset_diff < mean_diff + cs_duration:
             session_onsets[sessions[0]].append(onset)
         else:
             extinction_events_first_index = i
             break
+
         last_onset = onset
+
+    if extinction_events_first_index is None:
+        raise ValueError("Could not detect a gap large enough to split sessions.")
 
     session_onsets[sessions[1]] = event_onsets[extinction_events_first_index:]
 
-    num_acquisition_onsets = len(session_onsets[sessions[0]])
     last_acq_onset = session_onsets[sessions[0]][-1]
-
-    num_extinction_onsets = len(session_onsets[sessions[1]])
     first_ext_onset = session_onsets[sessions[1]][0]
-
     session_time_diff = round(first_ext_onset - last_acq_onset, 3)
 
-    logger.info(f"{len(event_onsets)}({num_acquisition_onsets} + {num_extinction_onsets}) markers found."
-                )
-    logger.info(f"Session diff: {session_time_diff}")
+    logger.info(
+        f"{len(event_onsets)}({len(session_onsets[sessions[0]])} + "
+        f"{len(session_onsets[sessions[1]])}) markers found."
+    )
 
-    extinction_ses_new_start = last_acq_onset + mean_diff / 2
-    logger.info(f"Setting new start time for task-{sessions[1]}: {round(extinction_ses_new_start, 3)}s")
+    # Biased split inside the long gap
+    biased_start = last_acq_onset + gap_bias * session_time_diff
 
-    new_extinction_onsets = [
-        onset - extinction_ses_new_start for onset in session_onsets[sessions[1]]
+    logger.info(f"Diff={round(session_time_diff, 3)}s | Bias={gap_bias} | last acq onset={round(last_acq_onset, 3)}s | biased_start={round(biased_start, 3)}s | time after last onset: {round(biased_start-last_acq_onset, 3)}s")
+    # Safeguard: keep at least `min_pre_second_block` seconds before block 2
+    latest_allowed_start = first_ext_onset - min_pre_second_block
+
+    logger.info(f"Minimum time before second block={min_pre_second_block}s | first ext onset={round(first_ext_onset, 3)}s | latest_allowed_start={latest_allowed_start}s")
+
+    extinction_ses_new_start = round(
+        min(biased_start, latest_allowed_start),
+        3
+    )
+
+    # Optional extra safeguard in pathological cases where the total gap
+    # is smaller than min_pre_second_block
+    if extinction_ses_new_start <= last_acq_onset:
+        logger.warning(
+            "Gap between sessions is smaller than the requested minimum "
+            f"pre-second-block buffer ({min_pre_second_block}s). "
+            "Using midpoint between session boundaries instead."
+        )
+        extinction_ses_new_start = round(
+            last_acq_onset + session_time_diff / 2,
+            3
+        )
+
+    logger.info(
+        f"Start task-{sessions[1]}: {extinction_ses_new_start}s (time to first event: {round(first_ext_onset-extinction_ses_new_start, 3)}s)"
+    )
+
+    session_onsets[sessions[1]] = [
+        round(onset - extinction_ses_new_start, 3)
+        for onset in session_onsets[sessions[1]]
     ]
 
-    session_onsets[sessions[1]] = new_extinction_onsets
-
-    return (extinction_ses_new_start, session_onsets)
-
+    return extinction_ses_new_start, session_onsets
 
 def split_df_into_sessions(
         physio_df: pd.DataFrame=None,
         sessions: list=["acquisition", "extinction"],
         sr: float=None,
+        gap_bias: float = 0.6,
+        min_pre_second_block: float = 10.0,        
         **kwargs
     ) -> tuple:
     """
@@ -181,6 +232,13 @@ def split_df_into_sessions(
     sr : float, optional
         Sampling rate of the physiological recording in Hz. Used to convert
         time (seconds) to sample indices.
+    gap_bias : float, default=0.6
+        Where to place the new start time inside the inter-session gap.
+        0.5 = middle of the gap
+        >0.5 = gives more leeway to the end of the first block.
+    min_pre_second_block : float, default=10.0
+        Minimum number of seconds that must remain between the computed
+        second-session start time and the first onset of the second block.        
     **kwargs
         Additional keyword arguments passed to :func:`extract_onsets_from_ttl`.
 
@@ -237,7 +295,12 @@ def split_df_into_sessions(
     )
 
     logger.info(f"Find splitting point between {sessions} sessions")
-    split_time, session_onsets = split_onsets(event_onsets, sessions)
+    split_time, session_onsets = split_onsets(
+        event_onsets,
+        sessions,
+        gap_bias=gap_bias,
+        min_pre_second_block=min_pre_second_block
+        )
 
     # convert split_time to index
     split_index = round(sr * split_time)
@@ -257,6 +320,7 @@ def handle_physio(
         subject_new_dir: str=None,
         subject_raw_data_path: str=None,
         lab_name: str=None,
+        write_files: bool=True
     ) -> dict:
     """
     Process raw physiological data and split it into session-specific outputs.
@@ -355,22 +419,22 @@ def handle_physio(
         
         logger.info(f"Splitting dataframe into sessions: {sessions}")
         try:
-            output_path = os.path.join(subject_new_dir, "physio")
             session_onsets = split_and_write_output_files(
                 physio_df,
                 sr=sr,
                 chan_info=chan_info,
                 sessions=sessions,
-                output_path=output_path,
+                output_path=subject_new_dir,
                 subject=subject_name,
-                lab_name=lab_name
+                lab_name=lab_name,
+                write_files=write_files
             )
 
             return session_onsets
         except Exception as e:
             raise Exception(f"Splitting sessions failed: {e}") from e
     else:
-        raise Exception(f"No physio files found for {subject_raw_data_path}") from e
+        raise Exception(f"No physio files found for {subject_raw_data_path}")
 
 
 def split_and_write_output_files(
@@ -380,7 +444,8 @@ def split_and_write_output_files(
         sessions: list=None,
         output_path: str=None,
         subject: str=None,
-        lab_name: str=None
+        lab_name: str=None,
+        write_files: bool=True
     ) -> dict:
     """
     Split physiological data into sessions and write modality-specific outputs.
@@ -469,36 +534,47 @@ def split_and_write_output_files(
     except:
         gap_factor = 5
 
+    gap_bias = config.get("gap_bias", 0.6)
+    try:
+        min_pre_second_block = abs(config.get("trim_window")[0])
+    except:
+        min_pre_second_block = 10
+    
+    logger.info(f"Reading from config: gap_bias={gap_bias} | min_pre_second_block={min_pre_second_block}")
+
     # split sessions
     try:
         session_onsets, session_physio_dfs = split_df_into_sessions(
             physio_df=physio_df,
             sessions=sessions,
             sr=sr,
+            gap_bias=gap_bias,
+            min_pre_second_block=min_pre_second_block,
             gap_factor=gap_factor
         )
     except Exception as e:
         raise Exception(f"Error while splitting sessions: {e}") from e
 
     # save to disk
-    for task_id, task_df in session_physio_dfs.items():
-        
-        # Define the output directory for physio data (using a 'physio' folder).
-        available_mods = available_labs.get(lab_name).get("Modalities")
-        for mod in available_mods:
-            logger.info(f"Processing modality='{mod}' | task={task_id}")
-            try:
-                handle_modality(
-                    modality_name=mod,
-                    modality_data=task_df[mod],
-                    output_path=output_path,
-                    subject=subject,
-                    lab_name=available_labs.get(lab_name).get("MetaName"),
-                    task=task_id,
-                    chan_info=chan_info
-                )
-            except Exception as e:
-                raise Exception(f"Failed to handle '{mod}' for task-{task_id}: {e}") from e
+    if write_files:
+        for task_id, task_df in session_physio_dfs.items():
+            
+            # Define the output directory for physio data (using a 'physio' folder).
+            available_mods = available_labs.get(lab_name).get("Modalities")
+            for mod in available_mods:
+                logger.info(f"Processing modality='{mod}' | task={task_id}")
+                try:
+                    handle_modality(
+                        modality_name=mod,
+                        modality_data=task_df[mod],
+                        output_path=output_path,
+                        subject=subject,
+                        lab_name=available_labs.get(lab_name).get("MetaName"),
+                        task=task_id,
+                        chan_info=chan_info,
+                    )
+                except Exception as e:
+                    raise Exception(f"Failed to handle '{mod}' for task-{task_id}: {e}") from e
 
     return session_onsets
 
@@ -591,6 +667,10 @@ def handle_modality(
     ... )
     """
 
+    if output_path is None:
+        raise ValueError(f"Must specify output path")
+    
+    output_path = os.path.join(output_path, "physio")
     os.makedirs(output_path, exist_ok=True)
     base_filename = f"{subject}_task-{task}_recording"
     tsv_path = os.path.join(
@@ -613,11 +693,14 @@ def handle_modality(
     if isinstance(chan_info, pd.DataFrame):
         logger.debug("Reading metadata from raw channel info")
         # set sampling frequency
-        mod_content["SamplingFrequency"] = chan_info.set_index("output_name").at[modality_name, "samples_per_second"]
+        sr = chan_info.set_index("output_name").at[modality_name, "samples_per_second"]
+        logger.debug(f"SamplingFrequency in channel_info: {sr}")
+        mod_content["SamplingFrequency"] = sr
 
         # set units
-        raw_unit = chan_info.set_index("output_name").at[modality_name, "units"]
-        mod_settings["Units"] = units.normalize_bids_unit(raw_unit)
+        units_ =  units.normalize_bids_unit(chan_info.set_index("output_name").at[modality_name, "units"])
+        logger.debug(f"Units in channel_info: {units_}")
+        mod_settings["Units"] = units_
 
     # fill modality-agnostic information
     logger.debug(f"Fetching general information from metadata.csv")
@@ -626,6 +709,15 @@ def handle_modality(
         modality_name,
         mod_content
     )
+    
+    if "SamplingFrequency" not in mod_content:
+        raise ValueError(f"Could not derive SamplingFrequency. Specify 'Sampling Rate' under '{lab_name}' -> '{modality_name}' -> 'Sampling Rate'")
+    else:
+        sr = mod_content.get("SamplingFrequency")
+        if not isinstance(sr, (int, float)):
+            raise TypeError(f"SamplingFrequency ({sr}) is of type {type(sr)}, but must be an integer or float")
+    
+    logger.info(f"Final SamplingRate: {mod_content.get('SamplingFrequency')}")
 
     # fill modality-specific metadata
     logger.debug(f"Fetching '{modality_name}'-specific information from metadata.csv")

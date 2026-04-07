@@ -25,7 +25,8 @@ config = {
         "AREA": 0.119,
         "DIAMETER": 0.00087743,
         "reference_distance": 700
-    }
+    },
+    "gap_bias": 0.6
 }
 
 
@@ -57,9 +58,9 @@ available_labs = {
             "stai": 20
         },
         "ChannelRegex": {
-            "data_key": "data",
-            "scr_channel": 2,
-            "ttl_channel": 3,
+            "scr_channel": "SCL",
+            "ttl_channel": "marker",
+            "ecg_channel": "ECG",
             "low_percentile": 60,   # filters out low US triggers
             "high_percentile": 95,  # filters out high 'start-of-block' triggers,
             "sampling_rate_hz": 1000.0  # default; verify with specified metadata
