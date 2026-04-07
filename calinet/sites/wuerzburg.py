@@ -76,7 +76,7 @@ def read_raw_physio_file(
     logger.info(f"Reading .acq file: {raw_physio_acq}")
 
     # read SamplingFrequency from metadata.csv
-    meta = _meta_for(df_meta, "EDA")
+    meta = _meta_for(df_meta, "SCR")
     sr = _get(
         meta,
         "Sampling Rate",
