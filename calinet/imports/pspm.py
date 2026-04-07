@@ -231,7 +231,7 @@ def _build_channel_table(
                 "index": i,
                 "output_name": col.upper(),
                 "units": unit_defaults.get(col.lower()),
-                "samples_per_second": sample_rate,
+                "samples_per_second": float(sample_rate),
                 "length": df[col].notna().sum(),
             }
         )
@@ -317,23 +317,27 @@ def _extract_and_resample_channels(
     duration_s = min(len(extracted[c]) / srs[c] for c in signal_channels)
     target_len = int(round(duration_s * target_sr))
 
-    def _resample_to_target(x, sr):
+    def _resample_to_target(x, sr, channel_name):
         x = np.asarray(x, dtype=np.float64).squeeze()
 
         if sr == target_sr:
             logger.debug(
-                f"Source SamplingFrequency ({sr}) matches target ({target_sr}) -> do nothing"
+                f"[{channel_name}]: Source SamplingFrequency ({sr}) matches target ({target_sr}) -> do nothing"
             )
             y = x.copy()
         else:
-            logger.debug(f"Resampling channel from {sr} to {target_sr}")
+            logger.debug(f"[{channel_name}]: Resampling channel from {sr} to {target_sr}")
             y = resample_poly(x, up=target_sr, down=sr)
 
         return np.asarray(y, dtype=np.float64).squeeze()[:target_len]
 
     data_dict = {}
     for chan in signal_channels:
-        data_dict[chan.upper()] = _resample_to_target(extracted[chan], srs[chan])
+        data_dict[chan.upper()] = _resample_to_target(
+            extracted[chan],
+            srs[chan],
+            channel_name=chan
+    )
 
     marker = extracted.get("marker", None)
     if marker is not None:
