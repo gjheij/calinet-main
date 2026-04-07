@@ -663,12 +663,26 @@ def fill_general(lab_name: str, modality_name: str, json_content: dict) -> dict:
     json_content["DeviceSerialNumber"] = _get(meta, "Manufacturer Device Serial Number", lab_name)
     json_content["SoftwareVersion"] = _get(meta, "Software Version", lab_name)
 
+    # we should have SamplingFrequency by now; default to df_meta
+    if not "SamplingFrequency" in json_content:
+        json_content["SamplingFrequency"] = None
+    
+    sr = json_content.get("SamplingFrequency")
+    if not isinstance(sr, (int, float)):
+        try:
+            sr = float(_get(meta, "Sampling Rate", lab_name))
+        except Exception:
+            raise ValueError(f"Could not derive SamplingFrequency. Specify 'Sampling Rate' -> '{lab_name}' -> '{modality_name}' -> 'Sampling Rate'") 
+        
+        logger.warning(f"Fetched SamplingFrequency from metadata: {sr} [this is a last-ditch effort.. Reading from physio-file is safer!]")
+        json_content["SamplingFrequency"] = sr
+
     return json_content
 
 
 def fill_scr_json(lab_name: str, json_content: dict) -> dict:
 
-    meta = _meta_for(df_meta, "EDA")
+    meta = _meta_for(df_meta, "SCR")
     scr = json_content.setdefault("scr", {})
     scr["SCRCouplerType"] = _get(meta, "EDA coupler type", lab_name)
     scr["SCRCouplerVoltage"] = _get(meta, "EDA coupler voltage", lab_name)

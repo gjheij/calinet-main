@@ -212,7 +212,6 @@ ECG_JSON_CONTENT = {
     "Manufacturer": "Biopac Systems",
     "ManufacturersModelName": "ECG100C",
     "DeviceSerialNumber": "1711008598",
-    "SamplingFrequency": 2000,
     "SoftwareVersion": "Biopac AcqKnowledge 5.0.2",
     "StartTime": 0,
     "PhysioType": "generic",
@@ -238,7 +237,6 @@ RESP_JSON_CONTENT = {
     "Manufacturer": "<Manufacturer-Name>",
     "ManufacturersModelName": "<Manufacturer-Model-Name>",
     "DeviceSerialNumber": "<Device-Serial-Number>",
-    "SamplingFrequency": 2000,
     "SoftwareVersion": "<Software-version>",
     "StartTime": 0,
     "PhysioType": "generic",
@@ -265,7 +263,6 @@ PPG_JSON_CONTENT = {
     "Manufacturer": "Biopac Systems",
     "ManufacturersModelName": "PPG100C",
     "DeviceSerialNumber": "",
-    "SamplingFrequency": 2000,
     "SoftwareVersion": "Biopac AcqKnowledge 5.0.2",
     "StartTime": 0,
     "PhysioType": "generic",
@@ -291,7 +288,6 @@ SCR_JSON_CONTENT = {
     "Manufacturer": "Biopac Systems",
     "ManufacturersModelName": "EDA100C/MEC100C",
     "DeviceSerialNumber": "1711001172",
-    "SamplingFrequency": 2000,
     "SoftwareVersion": "Biopac AcqKnowledge 5.0.2",
     "StartTime": 0,
     "PhysioType": "generic",
@@ -306,7 +302,7 @@ SCR_JSON_CONTENT = {
         "SCRCouplerType": "",
         "SCRCouplerVoltage": "",
         "Placement": "thenar and hypothenar eminences of the palmar surface",
-        "Units": "μS",
+        "Units": "uS",
         "MeasureType": "EDA-total"
     }
 }
