@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Tuple, Dict
 from datetime import datetime
 
+from calinet.core.io import load_json
 from typing import Optional, List, Dict, Any, Union
 
 import logging
@@ -23,6 +24,70 @@ TS_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\]")
 SUBJECT_RE = re.compile(
     r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}\]\s+\[(.*?)\]\s+\[[A-Z]+\]\s+"
 )
+
+
+def load_mapper(root_path: str, lab_name: str) -> dict:
+    """
+    Load mapper.json from root_path/lab_name/mapper.json
+    """
+    mapper_path = os.path.join(root_path, lab_name, "mapper.json")
+    
+    if not os.path.exists(mapper_path):
+        raise FileNotFoundError(f"Mapper file not found: {mapper_path}")
+    
+    return load_json(mapper_path)
+
+
+def build_reverse_mapper(mapper: dict) -> dict:
+    """
+    Create reverse mapping (value -> key)
+    """
+    return {v: k for k, v in mapper.items()}
+
+
+def query_id(
+        lab_name: str,
+        id: str,
+        root_path: str=r'Z:\CALINET2\converted'
+    ) -> str:
+    """
+    Query either:
+    - key -> value
+    - value -> key
+
+    Example:
+        sub-042 -> sub-CalinetLondon15
+        sub-CalinetLondon15 -> sub-042
+    """
+    mapper = load_mapper(root_path, lab_name)
+
+    # Case 1: id is a key
+    if id in mapper:
+        return mapper[id]
+
+    # Case 2: id is a value
+    reverse_mapper = build_reverse_mapper(mapper)
+    if id in reverse_mapper:
+        return reverse_mapper[id]
+
+    raise KeyError(f"ID '{id}' not found in mapper.")
+
+
+def query_key_to_value(root_path: str, lab_name: str, key: str) -> str:
+    """
+    Strict: key -> value only
+    """
+    mapper = load_mapper(root_path, lab_name)
+    return mapper.get(key)
+
+
+def query_value_to_key(root_path: str, lab_name: str, value: str) -> str:
+    """
+    Strict: value -> key only
+    """
+    mapper = load_mapper(root_path, lab_name)
+    reverse_mapper = build_reverse_mapper(mapper)
+    return reverse_mapper.get(value)
 
 
 def _get_units(meta: dict, modality: str) -> str:
