@@ -56,8 +56,11 @@ def read_physio_tsv_headerless(path: Union[Path, str]) -> pd.DataFrame:
     json_path = path.with_suffix('').with_suffix('.json')
     if json_path.exists():
         meta_cols = load_json(json_path).get("Columns")
+        logger.debug(f"Derived column names {meta_cols} from '{json_path}'")
         if len(meta_cols) == df.shape[1]:
             df.columns = meta_cols
+    else:
+        logger.debug(f"Could not derive column names; '{json_path}' does not exist. Current columns names: {list(df.columns)}")
 
     return df
 
