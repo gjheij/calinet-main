@@ -10,7 +10,7 @@ import logging
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +20,6 @@ TRIAL_RE = re.compile(r"^(\d+\.\d+)\s+\t?EXP\s+\t?New trial.*?:\s+(\{.*\})")
 
 # Example line: "325.2343    EXP    cs: autoDraw = True"
 AUTODRAW_RE = re.compile(r"^(\d+\.\d+)\s+\t?EXP\s+\t?([^:]+):\s+autoDraw\s*=\s*(True|False)")
-
-import ast
-import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-
-import pandas as pd
 
 
 # PsychoPy .log patterns
@@ -495,7 +488,7 @@ def compare_psychopy_and_biopac_ISIs(
     logger.info(f"TSV: '{tsv_event_file}'")
 
     # 4) Run your processing functions
-    pspy_df = extract_itis_from_psychopy_log(log_event_file)
+    pspy_df = extract_psychopy_trial_timing(log_event_file)
     tsv_df = extract_cs_and_isi(tsv_event_file)
 
     # 5) Merge ISIs (must have same number of CS entries!)
