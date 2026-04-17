@@ -18,6 +18,7 @@ from calinet.core.io import (
     load_json,
     find_smi_txt_files,
     convert_all_edfs_to_asc,
+    read_physio_tsv_headerless,
     write_physio_tsv_gz_headerless,
 )
 
@@ -481,6 +482,162 @@ def gaze_pixel_to_mm(
     return out
 
 
+def set_events_to_nan(
+        eye_input,
+        physioevents_input,
+        write_files: bool = False,
+        eye_output: Union[str, None] = None,
+        trial_types: tuple[str, ...] = ("blink", "saccade"),
+        eye_value_columns: Union[list[str], None] = None,
+        event_flag_columns: Union[list[str], None] = None,
+    ) -> pd.DataFrame:
+    """
+    Set eye-signal samples to NaN where paired physioevents mark blink/saccade periods.
+
+    Parameters
+    ----------
+    eye_input : str | Path | pd.DataFrame
+        Eye physio file or already loaded dataframe.
+    physioevents_input : str | Path | pd.DataFrame
+        Paired physioevents file or already loaded dataframe.
+    write_files : bool
+        If True and `eye_input` is a path, write the modified dataframe back out.
+    eye_output : str | None
+        Optional output path. If None and write_files=True, overwrite/use eye_input path.
+    trial_types : tuple[str, ...]
+        Values in physioevents['trial_type'] that should trigger masking.
+    eye_value_columns : list[str] | None
+        Columns in the eye dataframe to mask. Default: all columns except timestamp.
+    event_flag_columns : list[str] | None
+        Additional physioevents columns whose truthy values should trigger masking.
+        Example: ['blink'].
+
+    Returns
+    -------
+    pd.DataFrame
+        Eye dataframe with marked rows set to NaN.
+    """
+
+    # load inputs
+    eye_path = None
+    if isinstance(eye_input, (str, Path)):
+        eye_path = Path(eye_input)
+        eye_df = read_physio_tsv_headerless(eye_path)
+    else:
+        eye_df = eye_input.copy()
+
+    if isinstance(physioevents_input, (str, Path)):
+        phys_df = read_physio_tsv_headerless(physioevents_input)
+    else:
+        phys_df = physioevents_input.copy()
+
+    if eye_df.empty or phys_df.empty:
+        return eye_df
+
+    if "timestamp" not in eye_df.columns:
+        raise ValueError(f"Eye dataframe must contain a 'timestamp' column ({eye_df.columns})")
+
+    if "onset" not in phys_df.columns or "duration" not in phys_df.columns:
+        raise ValueError("Physioevents dataframe must contain 'onset' and 'duration' columns")
+
+    # decide which eye columns to mask
+    if eye_value_columns is None:
+        eye_value_columns = [c for c in eye_df.columns if c != "timestamp"]
+
+    # build event mask
+    mask = pd.Series(False, index=phys_df.index)
+
+    if "trial_type" in phys_df.columns:
+        mask |= phys_df["trial_type"].astype(str).str.lower().isin(
+            [x.lower() for x in trial_types]
+        )
+
+    if event_flag_columns is None:
+        event_flag_columns = [c for c in ("blink", "saccade") if c in phys_df.columns]
+
+    for col in event_flag_columns:
+        vals = phys_df[col]
+        if pd.api.types.is_bool_dtype(vals):
+            mask |= vals.fillna(False)
+        else:
+            mask |= vals.fillna(0).astype(float).astype(bool)
+
+    events_to_mask = phys_df.loc[mask, ["onset", "duration"]].copy()
+    if events_to_mask.empty:
+        if write_files and eye_path is not None:
+            out_path = Path(eye_output) if eye_output else eye_path
+            write_physio_tsv_gz_headerless(eye_df, out_path)
+        return eye_df
+
+    # ensure numeric
+    events_to_mask["onset"] = pd.to_numeric(events_to_mask["onset"], errors="coerce")
+    events_to_mask["duration"] = pd.to_numeric(events_to_mask["duration"], errors="coerce")
+    events_to_mask = events_to_mask.dropna(subset=["onset", "duration"])
+
+    out = eye_df.copy()
+    t = pd.to_numeric(out["timestamp"], errors="coerce").to_numpy()
+
+    for _, row in events_to_mask.iterrows():
+        start = row["onset"]
+        stop = start + row["duration"]
+        sample_mask = (t >= start) & (t < stop)
+        out.loc[sample_mask, eye_value_columns] = pd.NA
+
+    if write_files and eye_path is not None:
+        out_path = Path(eye_output) if eye_output else eye_path
+        write_physio_tsv_gz_headerless(out, out_path)
+
+    return out
+
+
+def mask_eye_recordings_with_physioevents(
+        output_dir: Union[str, Path],
+        overwrite: bool = True,
+    ) -> list[tuple[str, str]]:
+    """
+    Find eye recording files and their paired physioevents files in a directory,
+    then set marked event periods to NaN in the eye recordings.
+
+    Returns
+    -------
+    list of (eye_file, physioevents_file)
+        Pairs that were processed.
+    """
+
+    output_dir = Path(output_dir)
+    processed = []
+
+    eye_files = sorted(output_dir.glob("*recording-eye*_physio.tsv.gz"))
+
+    for eye_file in eye_files:
+        physioevents_file = Path(
+            str(eye_file).replace("_physio.tsv.gz", "_physioevents.tsv.gz")
+        )
+
+        if not physioevents_file.exists():
+            logger.warning(f"No paired physioevents file found for '{eye_file.name}'")
+            continue
+
+        logger.info(
+            f"Masking eye file '{eye_file.name}' using '{physioevents_file.name}'"
+        )
+
+        out_path = eye_file if overwrite else eye_file.with_name(
+            eye_file.name.replace("_physio.tsv.gz", "_physio_masked.tsv.gz")
+        )
+
+        set_events_to_nan(
+            eye_file,
+            physioevents_file,
+            write_files=True,
+            eye_output=str(out_path),
+        )
+
+        processed.append((str(eye_file), str(physioevents_file)))
+
+    return processed
+
+
 def fetch_and_write_eye_data(
         eye_file,
         output_base: str=None,
@@ -697,7 +854,7 @@ def fetch_and_write_eye_data(
             output_path = f"{output_base}{key}_physio.tsv.gz"
             logger.info(f"Writing {output_path}")
             write_physio_tsv_gz_headerless(
-                eye_mm.copy(),
+                eye_mm_ts.copy(),
                 output_path
             )
 
@@ -1119,6 +1276,7 @@ def process_eyetracker_file(
     else:
         logger.warning(f"No valid eye-tracking data detected (see messages above), skipping physioevents.")
 
+    # add stimulus presentation field to json
     if isinstance(onsets, str):
         onsets_json = onsets.replace(".tsv", ".json")
         if not os.path.exists(onsets_json):
@@ -1128,6 +1286,12 @@ def process_eyetracker_file(
         ev_meta = load_json(onsets_json)
         ev_meta.update(stim_pres)
         save_json(onsets_json, ev_meta)
+
+    # after physio + physioevents have been written | needs json file for columns
+    if write_files and output_base is not None:
+        out_dir = os.path.dirname(output_base)
+        logger.info(f"Setting physioevents to NaN in '{out_dir}'")
+        _ = mask_eye_recordings_with_physioevents(out_dir, overwrite=True)
 
 
 def find_eye_files(raw_path):
