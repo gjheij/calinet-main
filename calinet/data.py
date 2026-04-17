@@ -543,7 +543,8 @@ def run_pspm_trim_directory(
         event_value_col: Optional[str]="value",
         drop_offset_markers: bool=False,
         prefix: str="t",
-        overwrite: bool=False
+        overwrite: bool=False,
+        filters: Optional[Sequence[str]]=None
     ) -> List[Dict[str, Any]]:
     """
     Run ``pspm_trim`` across a directory tree of physiology files and trim
@@ -580,6 +581,11 @@ def run_pspm_trim_directory(
     overwrite : bool, default=False
         Whether to overwrite input files in place. If ``False``, trimmed
         outputs are written to new files with prefixed names.
+    filters : sequence of str or None, optional
+        Optional filename substring filters applied to discovered physiology
+        files. When provided, only files whose basename contains *all* filter
+        strings are retained. For example, ``["task-acquisition", "scr"]``
+        keeps only physiology files whose names contain both substrings.
 
     Returns
     -------
@@ -614,6 +620,14 @@ def run_pspm_trim_directory(
 
     # exclude physioevents masquerading as physio by substring overlap
     physio_files = [p for p in physio_files if "_physioevents." not in p.name]
+
+    if filters:
+        filters = [str(f) for f in filters if str(f).strip()]
+        logger.info(f"Applying physio filename filters: {filters}")
+        physio_files = [
+            p for p in physio_files
+            if all(filt in p.name for filt in filters)
+        ]
 
     logger.info(f"Found {len(physio_files)} physio file(s)")
 
