@@ -14,17 +14,18 @@ from calinet.core.metadata import (
 
 from typing import Dict, Tuple, Optional
 from calinet.utils import filter_non_printable
+from calinet.config import eyelink_regex
 
 import logging
 logger = logging.getLogger(__name__)
 
 
-_RE_CAL_TYPE = re.compile(r"\[(.*?)\]")
-_RE_CAL_VALID = re.compile(r"ERROR\s+([\d.]+)\s+avg\.\s+([\d.]+)\s+max")
-_RE_ELCL_PROC = re.compile(r"ELCL_PROC\s+(\w+)")
-_RE_GAZE_COORDS = re.compile(r"GAZE_COORDS\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)")
-_RE_PUPIL = re.compile(r"^PUPIL\s+(\w+)")
-_RE_RATE = re.compile(r"RATE\s+(\d+)")
+_RE_CAL_TYPE    = eyelink_regex["CAL_TYPE"]
+_RE_CAL_VALID   = eyelink_regex["CAL_VALID"]
+_RE_ELCL_PROC   = eyelink_regex["ELCL_PROC"]
+_RE_GAZE_COORDS = eyelink_regex["GAZE_COORDS"]
+_RE_PUPIL       = eyelink_regex["PUPIL"]
+_RE_RATE        = eyelink_regex["RATE"]
 
 
 def _parse_num(value):
@@ -123,7 +124,7 @@ def asc_to_df(
                 if not stripped[0].isdigit():
                     continue
 
-                # ---------- MONOCULAR ----------
+                # MONOCULAR
                 if recording_mode in ("LEFT", "RIGHT"):
 
                     if len(columns) < 4:
@@ -140,7 +141,7 @@ def asc_to_df(
                     else:
                         right_rows.append(row)
 
-                # ---------- BINOCULAR ----------
+                # BINOCULAR
                 elif recording_mode == "BINOCULAR":
 
                     if len(columns) < 7:
@@ -274,17 +275,17 @@ def get_eyetracker_setup_info(
     }
 
     with open(
-        asc_file,
-        "r",
-        encoding="utf-8",
-        errors="ignore"
+            asc_file,
+            "r",
+            encoding="utf-8",
+            errors="ignore"
         ) as f:
-
+        
         for raw in f:
             line = raw.strip()
 
             # Stop once recording starts
-            if "!MODE RECORD" in line:
+            if re.match(r"^\d+\s", line):
                 break
 
             # Calibration type
@@ -335,12 +336,12 @@ def get_eyetracker_setup_info(
                     info["MeasurementType"] = m.group(1)
                     found["MeasurementType"] = True
                 continue
-
+            
             # Sampling rate line often looks like: "SAMPLES ... RATE 1000 ..."
             if not found["SamplingFrequency"] and line.startswith("SAMPLES") and "RATE" in line:
                 m = _RE_RATE.search(line)
                 if m:
-                    info["SamplingFrequency"] = int(m.group(1))
+                    info["SamplingFrequency"] = int(float(m.group(1)))
                     found["SamplingFrequency"] = True
                 continue
 
@@ -360,8 +361,8 @@ def get_eyetracker_setup_info(
         for col in ["x_coordinate", "y_coordinate", "pupil_size"]:
             info[col]["Units"] = "mm"
     
-    logger.debug(f"StimulusPresentation: {stim_pres}")
-    logger.debug(f"Metadata: {info}")
+    logger.info(f"StimulusPresentation: {stim_pres}")
+    logger.info(f"Metadata: {info}")
 
     return info, stim_pres
 
