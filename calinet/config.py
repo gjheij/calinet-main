@@ -40,6 +40,17 @@ stim_colors = {
 }
 
 
+eyelink_regex = {
+    "CAL_TYPE": re.compile(r"\[(.*?)\]"),
+    "CAL_VALID": re.compile(r"ERROR\s+([\d.]+)\s+avg\.\s+([\d.]+)\s+max"),
+    "ELCL_PROC": re.compile(r"ELCL_PROC\s+(\w+)"),
+    "GAZE_COORDS": re.compile(
+        r"GAZE_COORDS\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)"
+    ),
+    "PUPIL": re.compile(r"^PUPIL\s+(\w+)"),
+    "RATE": re.compile(r"RATE\s+(\d+(?:\.\d+)?)"),
+}
+
 available_labs = {
     "amsterdam": {
         "Authors": [
@@ -197,7 +208,7 @@ available_labs = {
             "Bach, Dominik, R."
         ],
         "MetaName": "London",
-        "Modalities": ["SCR", "RESP", "PPG"],
+        "Modalities": ["SCR", "RESP", "ECG"],
         "Phenotype": {
             "Language": "english",
             "bfi": 30,
@@ -208,7 +219,7 @@ available_labs = {
             "stai": 20
         },
         "gap_factor_between_acq_ext": 5,
-        "has_eyetrack": None        
+        "has_eyetrack": "asc"        
     },    
     "newyork": {
         "Authors": [
