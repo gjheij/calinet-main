@@ -786,17 +786,22 @@ def clean_output_directory(
     This function performs destructive filesystem operations.
     """
     
+    log_basename = os.path.basename(log_file) if log_file else None
+
     for filename in os.listdir(converted_dataset_dir):
         file_path = os.path.join(converted_dataset_dir, filename)
+
+        # Skip log file and 'derivatives' folder
+        if filename == log_basename or filename == "derivatives":
+            continue
         
-        if filename != os.path.basename(log_file):
-            try:
-                if os.path.isfile(file_path) or os.path.islink(file_path):
-                    os.unlink(file_path)
-                elif os.path.isdir(file_path):
-                    shutil.rmtree(file_path)
-            except Exception as e:
-                raise Exception(f"Failed to delete {file_path}. Reason: {e}") from e
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            raise Exception(f"Failed to delete {file_path}. Reason: {e}") from e
 
 
 def get_session_and_task_name(
