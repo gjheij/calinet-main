@@ -287,7 +287,7 @@ def _convert_bundle_to_mat(
             "Resp_var_id": None,
             "Event_var_id": labels[1] if len(labels) > 1 else None,
             "CS_Duration": cs_duration,
-            "OnsetVar": int(np.min(event_values)),
+            "OnsetVar": 5,
         }
     }
 
@@ -424,7 +424,7 @@ def print_ezyscr_summary(
     if len(labels) > 1:
         logger.info(f"  Event var id: '{labels[1]}'")
     logger.info(f"  CS Duration:  {cs_duration}")
-    logger.info(f"  Onset var:    0")
+    logger.info(f"  Onset var:    5")
 
     logger.info("=" * 60)
 

@@ -1019,7 +1019,7 @@ def build_event_column(
         end = int((float(onset)+duration)*sampling_freq)
 
         if 0 <= start < n_samples:
-            event_col[start] = cs_value
+            event_col[start:end] = cs_value
             valid_count += 1
 
     logger.info(f"Valid mapped events: {valid_count}")
