@@ -28,458 +28,18 @@ from calinet.templates.common import (
 )
 
 from calinet.config import available_labs, config
+from calinet.core.utils import (
+    pupil_unit_to_mm,
+    gaze_pixel_to_mm,
+    pupil_summary
+)
 
 import logging
 logger = logging.getLogger(__name__)
 
-from typing import Any, Tuple, Union
+from typing import Any, Union
 from pathlib import Path
 from copy import deepcopy
-
-
-def diameter_to_mm(
-        inputs: float,
-        camera_eye_distance: float=None,
-        measurement_type="AREA"
-    ) -> tuple:
-    """
-    Convert pupil measurements to millimeters.
-
-    This function converts EyeLink pupil measurements (either AREA or DIAMETER)
-    into estimated pupil diameter in millimeters using a PsPM-style calibration
-    approach. The conversion applies a scaling factor based on the camera-eye
-    distance relative to a reference distance.
-
-    Parameters
-    ----------
-    inputs : float or array-like
-        Input pupil measurements. If `measurement_type="AREA"`, values are assumed
-        to represent pupil area and will be square-root transformed. If
-        `measurement_type="DIAMETER"`, values are treated as diameter directly.
-    camera_eye_distance : float, optional
-        Distance between the camera and the eye in millimeters. This value is used
-        to scale the pupil measurement relative to a reference distance defined
-        in the configuration.
-    measurement_type : {"AREA", "DIAMETER"}, default="AREA"
-        Type of input measurement:
-        - "AREA": input values represent pupil area (will be square-rooted)
-        - "DIAMETER": input values represent pupil diameter directly
-
-    Returns
-    -------
-    pupil_mm : float or ndarray
-        Estimated pupil diameter in millimeters.
-    conversion_info : dict
-        Dictionary containing metadata about the conversion, including:
-        - "Name": Name of the conversion function
-        - "Formula": String representation of the applied formula
-        - "Parameters": Dictionary of parameters used (multiplier, reference distance, screen distance)
-        - "Description": Brief description of the conversion method
-
-    Raises
-    ------
-    ValueError
-        If `measurement_type` is not one of {"AREA", "DIAMETER"}.
-
-    Notes
-    -----
-    The conversion formula is:
-
-        diameter_mm = multiplier * (camera_eye_distance / reference_distance) * f(inputs)
-
-    where:
-        - f(inputs) = sqrt(inputs) if measurement_type == "AREA"
-        - f(inputs) = inputs if measurement_type == "DIAMETER"
-
-    The `multiplier` and `reference_distance` are retrieved from the global
-    configuration (`config["pupil_multiplication"]`).
-
-    Examples
-    --------
-    >>> diameter_to_mm(4000, camera_eye_distance=600, measurement_type="AREA")
-    (value_in_mm, {...})
-
-    >>> diameter_to_mm(np.array([3.2, 3.5]), camera_eye_distance=600, measurement_type="DIAMETER")
-    (array([...]), {...})
-    """
-
-    if measurement_type == "AREA":
-        use_vals = np.sqrt(inputs)
-        ffunc = "sqrt(input)"
-    elif measurement_type == "DIAMETER":
-        use_vals = inputs.copy()
-        ffunc = "input"
-    else:
-        raise ValueError(f"measurement_type must be one of 'AREA' or 'DIAMETER', not '{measurement_type}'")
-
-    pupil_config = config.get("pupil_multiplication")
-    reference_distance = pupil_config.get("reference_distance")
-    multiplier = pupil_config.get(measurement_type)
-
-    logger.info(f"Converting {measurement_type.upper()} to mm; screen distance = {camera_eye_distance}mm | multiplier={multiplier}")
-
-    pupil_mm = (
-        multiplier * (camera_eye_distance / reference_distance) * use_vals
-    )
-
-    conversion_info = {
-        "Name": "diameter_to_mm",
-        "Formula": f"diameter_mm = multiplier * (camera_eye_distance / reference_distance) * {ffunc}",
-        "Parameters": {
-            "Multiplier": multiplier,
-            "ReferenceDistance": reference_distance,
-            "ScreenDistance": camera_eye_distance
-        },
-        "Description": "Converts EyeLink pupil AREA units to estimated pupil diameter in mm using PsPM-style calibration."
-    }
-
-    return pupil_mm, conversion_info
-
-
-def pupil_unit_to_mm(
-        df: pd.DataFrame,
-        overwrite=True,
-        column_name="pupil_size",
-        **kwargs
-    ) -> Tuple[pd.DataFrame, dict]:
-    """
-    Convert a DataFrame column of pupil measurements to millimeters.
-
-    This function applies :func:`diameter_to_mm` to a specified column in a
-    pandas DataFrame and appends the converted values as a new column. Optionally,
-    the original column can be overwritten with the converted values.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Input DataFrame containing pupil measurements.
-    overwrite : bool, default=True
-        If True, replaces the original column (`column_name`) with the converted
-        values in millimeters and removes the temporary column. If False, retains
-        both the original and converted columns.
-    column_name : str, default="pupil_size"
-        Name of the column in `df` containing pupil measurements to convert.
-    **kwargs
-        Additional keyword arguments passed to :func:`diameter_to_mm`, such as
-        `camera_eye_distance` and `measurement_type`.
-
-    Returns
-    -------
-    out : pandas.DataFrame
-        A copy of the input DataFrame with the converted pupil size values.
-        If `overwrite=True`, the original column is replaced. Otherwise, a new
-        column named ``f"{column_name}_mm"`` is added.
-    settings : dict
-        Dictionary containing metadata about the conversion, as returned by
-        :func:`diameter_to_mm`.
-
-    Notes
-    -----
-    This function does not modify the input DataFrame in place; a copy is always
-    created.
-
-    The conversion is performed element-wise on the specified column using
-    :func:`diameter_to_mm`.
-
-    Examples
-    --------
-    >>> df_mm, info = pupil_unit_to_mm(df, camera_eye_distance=600)
-    
-    >>> df_mm, info = pupil_unit_to_mm(
-    ...     df,
-    ...     column_name="pupil_area",
-    ...     measurement_type="AREA",
-    ...     overwrite=False
-    ... )
-    """
-
-    out = df.copy()
-    out[f"{column_name}_mm"], settings = diameter_to_mm(
-        out[column_name],
-        **kwargs
-    )
-
-    # overwrite column
-    if overwrite:
-        out[column_name] = out[f"{column_name}_mm"]
-        out.drop(columns=[f"{column_name}_mm"], inplace=True)
-
-    return out, settings
-
-
-def correct_to_fixation_hist_peak(
-        df: pd.DataFrame,
-        screen_mm: Union[tuple, list],
-        x_col: str="x_coordinate",
-        y_col: str="y_coordinate",
-        bin_size_mm: float=2.0,
-        return_shift: bool=True,
-    ) -> Tuple[pd.DataFrame, tuple]:
-    """
-    Recenters gaze coordinates to screen fixation using a 2D histogram-peak (mode) estimator.
-
-    This method estimates the fixation location as the densest region of gaze samples
-    in physical screen space (millimeters) and applies a rigid translation so that
-    this fixation cluster aligns with the geometric center of the screen.
-
-    Rationale
-    ---------
-    During fixation tasks, the majority of gaze samples cluster around a central
-    fixation target. However, global statistics such as the mean or median can be
-    biased by:
-        - saccades to stimuli
-        - asymmetric exploration
-        - blinks or signal dropouts
-        - drift or calibration offsets
-
-    Instead of using a global median, this method estimates the fixation location
-    as the statistical *mode* of the 2D gaze distribution using a coarse spatial
-    histogram. The bin with the highest sample count is taken as the fixation
-    cluster center.
-
-    Method
-    ------
-    1. Extract valid (finite) gaze samples in millimeters.
-    2. Construct a 2D histogram over the full physical screen extent with
-       square bins of size `bin_size_mm`.
-    3. Identify the histogram bin with the maximum count (density peak).
-    4. Compute the center of that bin (fx, fy).
-    5. Compute the geometric screen center (cx, cy) = (W/2, H/2).
-    6. Compute translation shift:
-           dx = fx - cx
-           dy = fy - cy
-    7. Apply rigid translation:
-           x' = clip(x - dx, 0, W)
-           y' = clip(y - dy, 0, H)
-
-    This is a pure translational correction (no rotation or scaling).
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Gaze dataframe with coordinates in millimeters.
-    screen_mm : tuple(float, float)
-        Physical screen size in millimeters as (width_mm, height_mm).
-    x_col : str
-        Column name containing horizontal gaze coordinates (mm).
-    y_col : str
-        Column name containing vertical gaze coordinates (mm).
-    bin_size_mm : float
-        Size of square bins used in histogram estimation (mm).
-        Typical values: 2–5 mm.
-        Smaller bins increase spatial precision but may increase noise sensitivity.
-    return_shift : bool
-        If True, also return the applied translation (dx, dy).
-
-    Returns
-    -------
-    df_corr : pandas.DataFrame
-        Copy of input dataframe with corrected gaze coordinates.
-    (dx, dy) : tuple of float
-        Translation shift applied in millimeters (optional).
-
-    Assumptions
-    -----------
-    - Gaze coordinates are already expressed in physical screen space (mm).
-    - The dominant cluster corresponds to fixation.
-    - The physical screen size is correctly specified.
-    - No rotation or scaling errors are present (only translation drift).
-
-    Limitations
-    -----------
-    - If fixation is not the dominant gaze state, the method may center
-      on a task-relevant stimulus instead.
-    - Very small bin sizes can overfit noise.
-    - Does not correct non-linear distortions or gain errors.
-
-    Notes
-    -----
-    This method is robust to asymmetric outliers and saccadic excursions
-    because it relies on the distribution mode rather than mean/median.
-    It is particularly suitable for large fixation-heavy datasets.
-    """
-
-    W, H = screen_mm
-    cx, cy = W / 2.0, H / 2.0
-
-    df_corr = df.copy()
-
-    x = df_corr[x_col].to_numpy()
-    y = df_corr[y_col].to_numpy()
-
-    # Remove invalid samples
-    mask = np.isfinite(x) & np.isfinite(y)
-    x = x[mask]
-    y = y[mask]
-
-    # Define histogram bins
-    x_bins = np.arange(0, W + bin_size_mm, bin_size_mm)
-    y_bins = np.arange(0, H + bin_size_mm, bin_size_mm)
-
-    H2d, x_edges, y_edges = np.histogram2d(x, y, bins=[x_bins, y_bins])
-
-    # Find peak bin
-    peak_idx = np.unravel_index(np.argmax(H2d), H2d.shape)
-
-    # Convert bin index to center coordinate
-    fx = (x_edges[peak_idx[0]] + x_edges[peak_idx[0] + 1]) / 2
-    fy = (y_edges[peak_idx[1]] + y_edges[peak_idx[1] + 1]) / 2
-
-    # Compute shift
-    dx = fx - cx
-    dy = fy - cy
-
-    # Apply correction
-    df_corr[x_col] = np.clip(df_corr[x_col] - dx, 0, W)
-    df_corr[y_col] = np.clip(df_corr[y_col] - dy, 0, H)
-
-    if return_shift:
-        return df_corr, (dx, dy)
-    else:
-        return df_corr
-
-
-def gaze_pixel_to_mm(
-        df: pd.DataFrame,
-        screen_size_mm=(311.25, 249.09),
-        screen_resolution_px=(1152, 864),
-        center=False,
-        overwrite=True,
-        **kwargs
-    ) -> pd.DataFrame:
-    """
-    Convert gaze coordinates from pixel units to millimeters using the physical screen size.
-
-    This function performs a linear pixel-to-metric conversion for 2D gaze coordinates.
-    It assumes that the gaze coordinates in `df[x_coordinate, y_coordinate]` are defined
-    in a screen coordinate system where pixel (0,0) corresponds to the top-left of the
-    active display area, and pixel values increase rightward (x) and downward (y).
-
-    The conversion is performed by computing mm-per-pixel scaling factors separately
-    for x and y based on the provided physical screen dimensions and the pixel
-    resolution:
-
-        mm_per_px_x = screen_width_mm  / screen_width_px
-        mm_per_px_y = screen_height_mm / screen_height_px
-
-    Then:
-
-        x_mm = x_px * mm_per_px_x
-        y_mm = y_px * mm_per_px_y
-
-    Optionally, the gaze coordinates can be corrected so that the origin is
-    at the screen center instead of the top-left corner via :function:`calinet.import.eyelink.correct_to_fixation_hist_peak()`:
-
-        Instead of using a global median, this method estimates the fixation location
-        as the statistical *mode* of the 2D gaze distribution using a coarse spatial
-        histogram. The bin with the highest sample count is taken as the fixation
-        cluster center.
-
-    This produces coordinates in a “centered mm” frame where (0,0) corresponds to
-    the geometric center of the screen.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Input data containing gaze coordinates in pixel units in columns:
-        `x_coordinate` and `y_coordinate` (unless you adapt the column names).
-    screen_size_mm : tuple(float, float)
-        Physical screen size in millimeters as (width_mm, height_mm). This should
-        reflect the actual active display area corresponding to the pixel coordinates.
-    screen_resolution_px : tuple(int, int)
-        Pixel resolution as (width_px, height_px) corresponding to the coordinate
-        system of the gaze data (e.g., from EyeLink GAZE_COORDS).
-    center : bool
-        If True, recenter the converted mm coordinates so the screen center is (0,0).
-        If False (default), the origin remains the top-left corner of the screen.
-    overwrite : bool
-        If True (default), overwrite `x_coordinate` and `y_coordinate` with the
-        millimeter coordinates, and drop the temporary `x_mm`, `y_mm` columns.
-        If False, keep `x_coordinate`/`y_coordinate` unchanged and add `x_mm`, `y_mm`.
-
-    Returns
-    -------
-    pandas.DataFrame
-        A copy of the input dataframe with gaze coordinates converted to millimeters.
-
-    Notes
-    -----
-    - This conversion is a pure linear scaling (+ optional translation). It does not
-      correct calibration drift, rotation, or non-linear distortions.
-    - X/Y scaling are computed independently; if pixels are square and the physical
-      dimensions are consistent with the resolution, mm_per_px_x ≈ mm_per_px_y.
-    - The function does not clip values to screen bounds; it assumes the input data
-      are valid within the pixel coordinate range.
-
-    Comparison to PsPM (pspm_convert_gaze) in "millimeter mode"
-    -----------------------------------------------------------
-    When `pspm_convert_gaze` is used with:
-        conversion.from   = 'pixel'
-        conversion.target = 'mm'
-        conversion.screen_width / screen_height set (mm)
-
-    PsPM calls `pspm_convert_pixel2unit_core`, which:
-      1) scales pixel coordinates to metric units using the provided screen lengths, and
-      2) also converts/updates the *channel range* metadata accordingly.
-
-    This Python function matches the essential *numerical scaling* step (pixel→mm),
-    but differs in two ways:
-
-      - Metadata/range handling:
-        PsPM updates channel header.range consistently; this function does not update
-        any external metadata unless you do so elsewhere.
-
-      - Centering behavior:
-        In PsPM, centering is primarily relevant when converting to degrees (visual
-        angle), because degrees are defined relative to screen center. Your `center=True`
-        option provides a centered-mm coordinate frame (useful, but not strictly the
-        same as PsPM’s degree conversion pathway).
-
-    If you want strict PsPM equivalence for pixel→mm, use:
-      - center=False
-      - consistent screen_size_mm and screen_resolution_px derived from the EyeLink
-        coordinate system (GAZE_COORDS / DISPLAY_COORDS).
-    """
-
-    w_mm = screen_size_mm[0]
-    h_mm = screen_size_mm[1]
-    w_px, h_px = screen_resolution_px
-
-    mm_per_px_x = w_mm / float(w_px)
-    mm_per_px_y = h_mm / float(h_px)
-
-    out = df.copy()
-    
-    out["x_mm"] = out["x_coordinate"].astype(float) * mm_per_px_x
-    out["y_mm"] = out["y_coordinate"].astype(float) * mm_per_px_y
-
-    if overwrite:
-        out["x_coordinate"] = out["x_mm"]
-        out["y_coordinate"] = out["y_mm"]
-        out.drop(["x_mm", "y_mm"], axis=1, inplace=True)
-
-    # center using histograms
-    if center:
-        defs = {
-            "bin_size_mm": 2.0,
-        }
-
-        for key, val in defs.items():
-            kwargs = update_kwargs(
-                kwargs,
-                key,
-                val
-            )
-
-        out = correct_to_fixation_hist_peak(
-            out,
-            screen_size_mm,
-            x_col="x_coordinate",
-            y_col="y_coordinate",
-            **kwargs
-        )
-
-    return out
 
 
 def set_events_to_nan(
@@ -557,10 +117,12 @@ def set_events_to_nan(
 
     for col in event_flag_columns:
         vals = phys_df[col]
+
         if pd.api.types.is_bool_dtype(vals):
             mask |= vals.fillna(False)
         else:
-            mask |= vals.fillna(0).astype(float).astype(bool)
+            vals_num = pd.to_numeric(vals, errors="coerce")
+            mask |= vals_num.fillna(0).astype(bool)
 
     events_to_mask = phys_df.loc[mask, ["onset", "duration"]].copy()
     if events_to_mask.empty:
@@ -593,15 +155,75 @@ def set_events_to_nan(
 def mask_eye_recordings_with_physioevents(
         output_dir: Union[str, Path],
         overwrite: bool = True,
+        **kwargs
     ) -> list[tuple[str, str]]:
     """
-    Find eye recording files and their paired physioevents files in a directory,
-    then set marked event periods to NaN in the eye recordings.
+    Apply event-based masking to eye-tracking recordings using paired physioevents files.
+
+    This function searches a directory for eye-tracking recordings (``*_physio.tsv.gz``)
+    and their corresponding physioevents files (``*_physioevents.tsv.gz``). For each
+    matched pair, it applies masking to the eye data by setting samples corresponding
+    to specified event periods (e.g., blinks or saccades) to NaN.
+
+    Masking is performed via :func:`set_events_to_nan`, which uses event onset and
+    duration information from the physioevents file to blank out affected samples
+    in the eye recording.
+
+    Parameters
+    ----------
+    output_dir : str or pathlib.Path
+        Directory containing eye-tracking physio files and their corresponding
+        physioevents files. Files are expected to follow the naming convention:
+        ``*_physio.tsv.gz`` and ``*_physioevents.tsv.gz``.
+
+    overwrite : bool, default=True
+        If True, the original eye recording files are overwritten with masked data.
+        If False, new files are written with the suffix ``"_physio_masked.tsv.gz"``
+        appended to the original filename.
+
+    **kwargs
+        Additional keyword arguments passed directly to
+        :func:`set_events_to_nan`. This can be used to control which event types
+        are masked (e.g., ``trial_types=("blink", "saccade")``), which columns are
+        affected, or other masking behavior.
 
     Returns
     -------
-    list of (eye_file, physioevents_file)
-        Pairs that were processed.
+    processed : list of tuple of str
+        List of tuples containing the processed file pairs:
+        ``(eye_file_path, physioevents_file_path)``.
+
+    Notes
+    -----
+    - Only files with matching ``*_physio.tsv.gz`` and
+      ``*_physioevents.tsv.gz`` names are processed.
+    - If a physioevents file is missing for a given eye recording, that file is
+      skipped and a warning is logged.
+    - Masking is performed by setting selected data columns (e.g., pupil size,
+      gaze coordinates) to NaN during event intervals.
+    - The exact masking behavior (e.g., blink-only vs. blink + saccade) depends
+      on the arguments passed via ``**kwargs``.
+    - This function operates at the file level and modifies or writes TSV.GZ
+      files using the project's I/O utilities.
+
+    Examples
+    --------
+    Mask both blinks and saccades in all eye recordings in a directory:
+
+    >>> mask_eye_recordings_with_physioevents(
+    ...     "derivatives/eyetracking",
+    ...     trial_types=("blink", "saccade"),
+    ...     event_flag_columns=["blink"]
+    ... )
+
+    Mask only blink periods and write to new files:
+
+    >>> mask_eye_recordings_with_physioevents(
+    ...     "derivatives/eyetracking",
+    ...     overwrite=False,
+    ...     trial_types=("blink",),
+    ...     event_flag_columns=["blink"]
+    ... )
     """
 
     output_dir = Path(output_dir)
@@ -629,9 +251,13 @@ def mask_eye_recordings_with_physioevents(
         set_events_to_nan(
             eye_file,
             physioevents_file,
-            write_files=True,
             eye_output=str(out_path),
+            **kwargs
         )
+
+        # check if range is reasonable
+        logger.info(f"Retrieving summary stats after masking for '{eye_file}'")
+        _ = pupil_summary(eye_file)
 
         processed.append((str(eye_file), str(physioevents_file)))
 
@@ -820,15 +446,7 @@ def fetch_and_write_eye_data(
             logger.info(f"Measurement type={measurement_type}; will not convert to mm")
 
         # check if range is reasonable
-        n = len(val["pupil_size"])
-        pupil_m = val["pupil_size"].mean()
-        pupil_sd = val["pupil_size"].std()
-        
-        warning_at_mm = config.get("warning_at_mm", 9)
-        if pupil_m>warning_at_mm:
-            logger.warning(f"Average pupil size ({round(pupil_m, 3)}±{round(pupil_sd, 3)}) > plausible threshold ({warning_at_mm}) over n={n} samples. Output may be invalid..")
-        else:
-            logger.warning(f"Pupil range is reasonable: {round(pupil_m, 3)}±{round(pupil_sd, 3)}. This is within plausible limit ({warning_at_mm})")
+        _ = pupil_summary(val)
 
         # convert gaze to mm
         logger.info(f"Converting gaze data to mm; screen={screen_size_mm}mm | resolution={screen_res_px}px")
@@ -1062,28 +680,24 @@ def create_physioevents_files(
         # set function depending on input
         if eye_file.endswith(".asc"):
             from calinet.imports.eyelink import fetch_physioevents
-            
-            # eyelink doesn't need actual dataframe
-            inputs = {
-                "raw_file": eye_file
-            }
-
         elif eye_file.endswith(".txt"):
             from calinet.imports.smi import fetch_physioevents
-            
-            # smi needs dataframe to calculate saccades/blinks
-            saccade_settings = config.get("smi_settings")
-            logger.debug(f"Settings for saccades/blink: {saccade_settings}")
-            inputs = {
-                "df": val,
-                "raw_file": eye_file
-            }
-
-            inputs = {**inputs, **saccade_settings}
-
         else:
             raise TypeError(f"Invalid extension for eye-tracking file. Must be 'asc' for EyeLink or '.txt' from SMI")
+            
+        # define input dict
+        inputs = {
+            "df": val,
+            "raw_file": eye_file
+        }
+
+        # fetch saccade/blink settings from config
+        saccade_settings = config.get("blink_detection_settings")
+        logger.debug(f"Settings for saccades/blink: {saccade_settings}")
         
+        # combine inputs
+        inputs = {**inputs, **saccade_settings}
+
         # update lab-specific inputs
         for k, v in inputs.items():
             kwargs = update_kwargs(
@@ -1143,7 +757,7 @@ def create_physioevents_files(
 
             # add algorithm settings for SMI-files
             if isinstance(phys_settings, dict):
-                logger.info(f"Updating EYE_PHYSIO_EVENTS_JSON_TEMPLATE with SMI-information")
+                logger.info(f"Updating EYE_PHYSIO_EVENTS_JSON_TEMPLATE with blink/saccade settings")
                 phys_tpl.update(phys_settings)
 
             # Create a JSON file for physio events
@@ -1290,8 +904,21 @@ def process_eyetracker_file(
     # after physio + physioevents have been written | needs json file for columns
     if write_files and output_base is not None:
         out_dir = os.path.dirname(output_base)
-        logger.info(f"Setting physioevents to NaN in '{out_dir}'")
-        _ = mask_eye_recordings_with_physioevents(out_dir, overwrite=True)
+
+        logger.info(
+            "Applying physioevents-based masking to eye recordings | "
+            f"directory='{out_dir}' | overwrite=True | write_files={write_files}"
+        )
+
+        processed = mask_eye_recordings_with_physioevents(
+            out_dir,
+            overwrite=True,
+            write_files=write_files
+        )
+
+        logger.info(
+            f"Completed masking of {len(processed)} eye recording file(s) in '{out_dir}'"
+        )
 
 
 def find_eye_files(raw_path):
@@ -1525,153 +1152,3 @@ def handle_eyetracking(
             logger.info("Created eyetracker files")
     else:
         logger.warning(f"No eyetracking-files found for {subject_name}")
-
-
-def estimate_screen_dimensions(
-        diagonal_inch: float,
-        width_px: int,
-        height_px: int
-    ) -> tuple:
-    """
-    Estimate physical screen dimensions from diagonal size and resolution.
-
-    This function computes the physical width and height of a display (in
-    millimeters) based on its diagonal size (in inches) and pixel resolution.
-    The calculation assumes square pixels and uses the aspect ratio derived
-    from the resolution.
-
-    Parameters
-    ----------
-    diagonal_inch : float
-        Screen diagonal in inches.
-    width_px : int
-        Horizontal resolution of the screen in pixels.
-    height_px : int
-        Vertical resolution of the screen in pixels.
-
-    Returns
-    -------
-    width_mm : float
-        Estimated screen width in millimeters.
-    height_mm : float
-        Estimated screen height in millimeters.
-
-    Notes
-    -----
-    The computation proceeds as follows:
-
-    1. Convert diagonal from inches to millimeters:
-       ``diagonal_mm = diagonal_inch * 25.4``
-
-    2. Compute aspect ratio:
-       ``r = width_px / height_px``
-
-    3. Solve for height using the Pythagorean relation:
-       ``height_mm = diagonal_mm / sqrt(r^2 + 1)``
-
-    4. Compute width:
-       ``width_mm = r * height_mm``
-
-    Assumes:
-        - Square pixels
-        - Accurate diagonal measurement
-        - No display scaling
-
-    Examples
-    --------
-    >>> estimate_screen_dimensions(24, 1920, 1080)
-    (531.3..., 298.8...)
-
-    >>> estimate_screen_dimensions(13.3, 2560, 1600)
-    (286.4..., 179.0...)
-    """
-
-    # Convert diagonal to mm
-    diagonal_mm = diagonal_inch * 25.4
-
-    # Aspect ratio
-    r = width_px / height_px
-
-    # Compute height in mm
-    height_mm = diagonal_mm / math.sqrt(r**2 + 1)
-
-    # Compute width in mm
-    width_mm = r * height_mm
-
-    return width_mm, height_mm
-
-
-def correct_to_fixation(
-        df,
-        screen_mm: list,
-        x_col: str="x_coordinate",
-        y_col: str="y_coordinate",
-        radius_mm: float=30,
-        return_shift: bool=True,
-    ) -> tuple:
-    """
-    Robustly recenters gaze coordinates to screen fixation.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Dataframe containing gaze coordinates in mm.
-    screen_mm : tuple(float, float)
-        Physical screen size in mm (W, H).
-    x_col, y_col : str
-        Column names for gaze coordinates.
-    radius_mm : float
-        Radius (in mm) used to select central fixation cluster.
-    return_shift : bool
-        Whether to return (dx, dy) along with dataframe.
-
-    Returns
-    -------
-    df_corr : pandas.DataFrame
-        Corrected dataframe.
-    (dx, dy) : tuple (optional)
-        Estimated correction shift in mm.
-    """
-
-    W, H = screen_mm
-    cx, cy = W / 2.0, H / 2.0
-
-    df_corr = df.copy()
-
-    x = df_corr[x_col].to_numpy(dtype=float)
-    y = df_corr[y_col].to_numpy(dtype=float)
-
-    # Robust overall center estimate
-    mx = np.nanmedian(x)
-    my = np.nanmedian(y)
-
-    # Select points within radius of cluster center
-    mask = (
-        np.isfinite(x)
-        & np.isfinite(y)
-        & ((x - mx) ** 2 + (y - my) ** 2 <= radius_mm**2)
-    )
-
-    if np.sum(mask) < 10:
-        raise ValueError("Not enough fixation samples inside radius.")
-
-    # Compute shift
-    dx = np.nanmedian(x[mask]) - cx
-    dy = np.nanmedian(y[mask]) - cy
-
-    # Apply correction
-    x_corr = x - dx
-    y_corr = y - dy
-
-    # Clip to screen bounds
-    x_corr = np.clip(x_corr, 0, W)
-    y_corr = np.clip(y_corr, 0, H)
-
-    df_corr[x_col] = x_corr
-    df_corr[y_col] = y_corr
-
-    if return_shift:
-        return df_corr, (dx, dy)
-    else:
-        return df_corr
-    

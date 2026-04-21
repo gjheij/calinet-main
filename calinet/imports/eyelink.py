@@ -12,7 +12,10 @@ from calinet.core.metadata import (
     stimulus_presentation_from_metadata
 )
 
-from typing import Dict, Tuple, Optional
+
+from calinet.core.utils import fetch_physioevents_from_df
+
+from typing import Dict, Tuple, Optional, Union, Any
 from calinet.utils import filter_non_printable
 from calinet.config import eyelink_regex
 
@@ -244,6 +247,7 @@ def get_eyetracker_setup_info(
         eye_lower = eye.lower()
         info["RecordedEye"] = eye_lower
     else:
+        eye = None
         logger.warning(f"Cannot set 'RecordedEye' without eye_name")
 
     # Specific information
@@ -289,9 +293,12 @@ def get_eyetracker_setup_info(
                 break
 
             # Calibration type
-            if (not found["CalibrationType"]
+            if (
+                eye is not None
+                and not found["CalibrationType"]
                 and line.startswith(">>>>>>> CALIBRATION")
-                and eye in line):
+                and eye in line
+            ):
                 m = _RE_CAL_TYPE.search(line)
                 if m:
                     info["CalibrationType"] = m.group(1)
@@ -299,9 +306,12 @@ def get_eyetracker_setup_info(
                 continue
 
             # Calibration validation errors
-            if (not found["AverageCalibrationError"]
+            if (
+                eye is not None
+                and not found["AverageCalibrationError"]
                 and "!CAL VALIDATION" in line
-                and eye in line):
+                and eye in line
+            ):
                 m = _RE_CAL_VALID.search(line)
                 if m:
                     info["AverageCalibrationError"] = float(m.group(1))
@@ -445,9 +455,11 @@ def _get_first_sample_timestamp(
 
 
 def fetch_physioevents(
+        df: Optional[pd.DataFrame]=None,
         raw_file: Optional[str]=None,
-        drop_negative_msgs: bool=False
-    ) -> Tuple[pd.DataFrame, None]:
+        drop_negative_msgs: bool=False,
+        **kwargs
+    ) -> Tuple[pd.DataFrame, Union[Dict[str, Any]]]:
     """
     Parse EyeLink events and return a dataframe of event timings.
 
@@ -458,11 +470,21 @@ def fetch_physioevents(
 
     Parameters
     ----------
+    df : pandas.DataFrame, optional
+        Eye-tracking DataFrame in millimeters. Expected to contain
+        ``"timestamp"``, ``"x_coordinate"``, ``"y_coordinate"``, and
+        ``"pupil_size"`` columns for physioevent generation.
+        If passed, blinks/saccades are defined using :func:`calinet.core.utils.fetch_physioevents_from_df`,
+        otherwise EyeLink's algorithm is honored (can underestimate
+        blinks quite badly)    
     raw_file : str, optional
         Path to the ASC file.
     drop_negative_msgs : bool, default=False
         Whether to exclude message events with negative onset times (relative
         to the first sample timestamp).
+    **kwargs : Any
+        Additional keyword arguments passed to
+        ``fetch_physioevents_from_df``.
 
     Returns
     -------
@@ -495,12 +517,13 @@ def fetch_physioevents(
     >>> events_df, _ = fetch_physioevents("subject.asc")
     >>> events_df.head()
     """
-    
+
+    logger.info(f"Reading messages from EyeLink's file")
     rows = []
     ongoing_events = {}
 
     t0_raw = _get_first_sample_timestamp(raw_file)
-    logger.info(f"Index of first sample={t0_raw}")
+    logger.debug(f"Index of first sample={t0_raw}")
 
     with open(raw_file, "r", encoding="utf-8", errors="ignore") as file:
         for line in file:
@@ -538,7 +561,7 @@ def fetch_physioevents(
                         "duration": duration_sec,
                         "trial_type": trial_type,
                         "blink": blink,
-                        "value": "n/a",
+                        "message": "n/a",
                     })
 
             elif event_type == "MSG":
@@ -555,13 +578,41 @@ def fetch_physioevents(
                         "message": message,
                     })
 
-    # make dataframe
-    events_df = pd.DataFrame(
-        rows,
-        columns=["onset", "duration", "trial_type", "blink", "message"]
-    )
+        # make dataframe
+        events_df = pd.DataFrame(
+            rows,
+            columns=["onset", "duration", "trial_type", "blink", "message"]
+        )
 
-    events_df = events_df.sort_values("onset", kind="stable").reset_index(drop=True)
+        # read events from dataframe (same method as SMI)
+        if df is not None:
+            logger.info(f"Reading physioevents from dataframe, ignoring EyeLink's algorithm")
+            meta_dict, _ = get_eyetracker_setup_info(raw_file)
 
-    # return tuple to maintain compatibility
-    return events_df, None
+            sr = meta_dict.get("SamplingFrequency")
+            custom_df, settings = fetch_physioevents_from_df(
+                df,
+                sr=sr,
+                **kwargs
+            )
+
+            # keep only message rows from original EyeLink parsing
+            logger.info(f"Appending MSG-fields from EyeLink file")
+            msg_df = events_df.loc[events_df["message"] != "n/a"].copy()
+
+            # combine with custom (dataframe-derived) events
+            events_df = pd.concat(
+                [custom_df, msg_df],
+                ignore_index=True
+            )
+
+            # sort by onset
+            events_df = events_df.sort_values("onset", kind="stable").reset_index(drop=True)
+
+            return events_df, settings
+    
+        else:
+            events_df = events_df.sort_values("onset", kind="stable").reset_index(drop=True)
+
+            # return tuple to maintain compatibility
+            return events_df, None
