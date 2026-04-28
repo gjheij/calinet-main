@@ -1,4 +1,4 @@
-function make_synth_calinet_bids(root_dir, overwrite)
+function [phys_file, events_tsv, root_dir] = calinet_synth_data(root_dir, overwrite)
 % This function generates a simulated SCR time series with known event timing
 % and writes it to a BIDS-style folder structure under:
 %   root_dir/sub-<sub>/ses-<ses>/physio/
@@ -22,8 +22,8 @@ function make_synth_calinet_bids(root_dir, overwrite)
 %   - Adds a slow drift and Gaussian noise
 %
 % Usage:
-%   make_synth_calinet_bids('C:\path\to\SyntheticSCR');
-%   make_synth_calinet_bids('C:\path\to\SyntheticSCR', true); (optional)
+%   [phys_file, events_tsv, root_dir] = calinet_synth_data('C:\path\to\SyntheticSCR');
+%   [phys_file, events_tsv, root_dir] = calinet_synth_data('C:\path\to\SyntheticSCR', true); (optional)
 
     if nargin < 2 || isempty(overwrite)
         overwrite = true;
@@ -39,11 +39,11 @@ function make_synth_calinet_bids(root_dir, overwrite)
         end
     end
 
-    %% ---- parameters ----
+    %% parameters
     sub  = "Synth01";
     task = "acquisition";
 
-    sr = 2000;               % sampling rate (Hz)
+    sr = 100;               % sampling rate (Hz)
     td = 1/sr;
 
     % Stimulus timing parameters
@@ -71,7 +71,7 @@ function make_synth_calinet_bids(root_dir, overwrite)
     noise_sd  = 0.03;
     drift_amp = 0.05;
 
-    %% ---- generate CALINET-like acquisition schedule ----
+    %% generate CALINET-like acquisition schedule
     rng(1);  % reproducible
 
     % Trial order with exactly 8 CS+ and 8 CS-
@@ -105,7 +105,7 @@ function make_synth_calinet_bids(root_dir, overwrite)
     t = (0:td:T-td)';
     N = numel(t);
 
-    %% ---- build driver and convolve ----
+    %% build driver and convolve
     u = zeros(N,1);
 
     add_impulses(csm_on,  amp_csm);
@@ -124,7 +124,7 @@ function make_synth_calinet_bids(root_dir, overwrite)
 
     signal = scr + drift + noise;
     
-    %% ---- write BIDS structure ----
+    %% write BIDS structure
     ses_dir    = fullfile(root_dir, "sub-" + sub);
     physio_dir = fullfile(ses_dir, "physio");
     if ~exist(physio_dir, "dir"), mkdir(physio_dir); end
@@ -146,7 +146,7 @@ function make_synth_calinet_bids(root_dir, overwrite)
     pj.participant_id = struct("Description","Participant identifier");
     write_json(fullfile(root_dir,"participants.json"), pj);
 
-    %% ---- physio TSV (gzipped) ----
+    %% physio TSV (gzipped)
     timestamp = (0:numel(signal)-1)' / sr;   % seconds, starts at 0
     scr_table = [timestamp, signal];
     
@@ -158,7 +158,9 @@ function make_synth_calinet_bids(root_dir, overwrite)
     gzip(scr_tsv);
     delete(scr_tsv);
 
-    %% ---- physio JSON ----
+    phys_file = fullfile(sprintf('%s.gz', scr_tsv));
+
+    %% physio JSON
     scr_json = struct();
     scr_json.Columns = {'timestamp', 'scr'};
     scr_json.Manufacturer = "Synthetic";
@@ -187,7 +189,7 @@ function make_synth_calinet_bids(root_dir, overwrite)
 
     write_json(strrep(scr_tsv, ".tsv", ".json"), scr_json);
 
-    %% ---- events.tsv (then gzip) ----
+    %% events.tsv (then gzip)
     % Acquisition events
     onset_acq = [csm_on; cspu_on; cspr_on; usp_on];
 
@@ -236,7 +238,7 @@ function make_synth_calinet_bids(root_dir, overwrite)
     end
     fclose(fid);
 
-    %% ---- events.json ----
+    %% events.json
     evj = struct();
     evj.onset = struct("Description","Event onset in seconds");
     evj.duration = struct("Description","Event duration in seconds");
@@ -245,7 +247,7 @@ function make_synth_calinet_bids(root_dir, overwrite)
     evj.task_name = struct("Description","Task/phase label (habituation/acquisition/extinction)");
     write_json(fullfile(physio_dir, sprintf("%s_events.json", base)), evj);
 
-    %% ---- events.json ----
+    %% events.json
     evj = struct();
     evj.onset = struct("Description","Event onset in seconds");
     evj.duration = struct("Description","Event duration in seconds");
