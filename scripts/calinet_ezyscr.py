@@ -70,6 +70,17 @@ if __name__ == "__main__":
         help="Overwrite existing MAT files",
     )
 
+    parser.add_argument(
+        "--upsample-to",
+        type=float,
+        default=None,
+        help=(
+            "Optionally upsample the exported EzySCR MAT file to the "
+            "specified sampling frequency (Hz). "
+            "Only integer upsampling factors are supported."
+        ),
+    )
+
     args = parser.parse_args()
 
     raw_data_dir = os.path.abspath(args.input_dir)
@@ -93,6 +104,7 @@ if __name__ == "__main__":
     logger.info(f"Log-file: {log_file}")
     logger.info(f"Input dataset: {raw_data_dir}")
     logger.info(f"Output EzySCR directory: {output_dir}")
+    logger.info(f"Upsampling frequency for export: {args.upsample_to} Hz" if args.upsample_to else "No upsampling")
 
     convert_dataset_to_ezyscr(
         input_dir=raw_data_dir,
@@ -101,5 +113,6 @@ if __name__ == "__main__":
         overwrite=args.overwrite,
         include_n=args.first,
         subjects_tsv=args.subjects_tsv,
-        task_name=args.task
+        task_name=args.task,
+        upsample_to=args.upsample_to
     )

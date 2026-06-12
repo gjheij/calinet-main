@@ -9,6 +9,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from scipy.io import savemat, loadmat
+from scipy.signal import resample_poly
+from fractions import Fraction
 
 import calinet.core.io as cio
 from calinet.config import config
@@ -36,7 +38,8 @@ def save_ezyscr_mat(
         scr_signal,
         event_signal,
         sampling_freq,
-        scr_units="uS"
+        scr_units="uS",
+        upsample_to=None,
     ) -> None:
     """
     Save physiology and event data in EzySCR-compatible MATLAB format.
@@ -100,6 +103,31 @@ def save_ezyscr_mat(
 
     scr_signal = np.asarray(scr_signal, dtype=np.float64).reshape(-1)
     event_signal = np.asarray(event_signal, dtype=np.float64).reshape(-1)
+    
+    # upsample data if requested (e.g., to meet EzySCR's minimum sampling frequency requirements)
+    if upsample_to is not None and upsample_to > sampling_freq:
+        logger.info(f"Upsampling from {sampling_freq:.2f} Hz to {upsample_to:.2f} Hz")
+
+        ratio = Fraction(float(upsample_to) / float(sampling_freq)).limit_denominator()
+        up = ratio.numerator
+        down = ratio.denominator
+
+        # SCR: anti-aliased polyphase resampling
+        scr_signal = resample_poly(scr_signal, up=up, down=down)
+
+        # Event: nearest-neighbor resampling to preserve discrete codes
+        old_t = np.arange(len(event_signal)) / sampling_freq
+        new_t = np.arange(len(scr_signal)) / upsample_to
+        event_idx = np.searchsorted(old_t, new_t, side="right") - 1
+        event_idx = np.clip(event_idx, 0, len(event_signal) - 1)
+        event_signal = event_signal[event_idx]
+
+        sampling_freq = float(upsample_to)
+
+        # Ensure exact same length
+        n = min(len(scr_signal), len(event_signal))
+        scr_signal = scr_signal[:n]
+        event_signal = event_signal[:n]
 
     if scr_signal.shape[0] != event_signal.shape[0]:
         raise ValueError("scr_signal and event_signal must have the same length")
@@ -124,7 +152,8 @@ def _convert_bundle_to_mat(
         bundle: dict,
         output_dir: str,
         modality: str,
-        overwrite: bool = False
+        overwrite: bool = False,
+        upsample_to: Optional[float] = None
     ) -> str:
     """
     Convert one task-specific physiology bundle into MAT and JSON outputs.
@@ -239,7 +268,9 @@ def _convert_bundle_to_mat(
         event_signal=event_col,
         sampling_freq=sampling_freq,
         scr_units=signal_units,
+        upsample_to=upsample_to
     )
+    
     logger.info(f"Saved MAT: '{out_path}'")
 
     # Load MAT to ensure consistency
@@ -437,6 +468,7 @@ def convert_dataset_to_ezyscr(
         overwrite: bool=False,
         include_n: Optional[int]=None,
         subjects_tsv: Optional[str]=None,
+        upsample_to: Optional[float] = None
     ) -> None:
     """
     Convert a blinded dataset into EzySCR-compatible MAT files.
@@ -538,7 +570,7 @@ def convert_dataset_to_ezyscr(
             logger.warning(
                 f"Subjects requested in export file but not found in dataset: {missing_subjects}"
             )
-
+      
         for rec in selected_records:
             subject = rec["subject_id"]
             subject_dir = rec["subject_path"]
@@ -577,6 +609,7 @@ def convert_dataset_to_ezyscr(
                     output_dir=dest_subject_dir,
                     modality=modality,
                     overwrite=overwrite,
+                    upsample_to=upsample_to
                 )
                 last_bundle = bundle
 
@@ -667,6 +700,7 @@ def convert_dataset_to_ezyscr(
                     output_dir=dest_subject_dir,
                     modality=modality,
                     overwrite=overwrite,
+                    upsample_to=upsample_to
                 )
                 last_bundle = bundle
 
