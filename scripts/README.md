@@ -45,6 +45,20 @@ python -m calinet_convert `
     --debug
 ```
 
+#### UCL data
+For London data, we first convert the SMR files with ``calinet_import_smr.ps1``:
+
+```powershell
+.\calinet_import_smr.ps1 `
+  -InputDir 'Z:\CALINET2\sourcedata\london' `
+  -Site ucl `
+  -Recurse `
+  -Workers 4 `
+  -Overwrite
+```
+
+Then we proceed with conversion to BIDS:
+
 ### Behavior
 
 * Automatically detects subjects and files in raw dataset
@@ -252,6 +266,16 @@ python calinet_ezyscr.py `
   --task acquisition
 ```
 
+Austin's 200Hz Sampling rate seems incompatible with the way EzySCR ingests data and events.
+In the end, it was easier to upsample the data to 1000Hz:
+```bash
+python calinet_ezyscr.py `
+  --input-dir '..\..\..\converted\austin' `
+  --output-dir '..\..\..\derivatives\EzySCR\' `
+  --task acquisition `
+  --upsample-to 1000 `
+  --overwrite
+```
 ### Output
 
 ```bash
