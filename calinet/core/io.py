@@ -43,6 +43,7 @@ def save_json(path: Union[Path, str], data: dict) -> None:
 
 def read_physio_tsv_headerless(path: Union[Path, str]) -> pd.DataFrame:
     path = Path(path)
+
     df = pd.read_csv(
         path,
         sep="\t",
@@ -52,16 +53,24 @@ def read_physio_tsv_headerless(path: Union[Path, str]) -> pd.DataFrame:
         keep_default_na=True,
     )
 
-    # read the columns
-    json_path = path.with_suffix('').with_suffix('.json')
+    metadata = {}
+
+    json_path = path.with_suffix("").with_suffix(".json")
     if json_path.exists():
-        meta_cols = load_json(json_path).get("Columns")
+        metadata = load_json(json_path)
+
+        meta_cols = metadata.get("Columns")
         logger.debug(f"Derived column names {meta_cols} from '{json_path}'")
-        if len(meta_cols) == df.shape[1]:
+
+        if meta_cols is not None and len(meta_cols) == df.shape[1]:
             df.columns = meta_cols
     else:
-        logger.debug(f"Could not derive column names; '{json_path}' does not exist. Current columns names: {list(df.columns)}")
+        logger.debug(
+            f"Could not derive column names; '{json_path}' does not exist. "
+            f"Current column names: {list(df.columns)}"
+        )
 
+    df.attrs["metadata"] = metadata
     return df
 
 
