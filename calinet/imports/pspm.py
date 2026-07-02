@@ -608,7 +608,7 @@ def pspm_downsample_array(
     if fs is None:
         raise ValueError("fs must be the sampling rate before downsampling.")
 
-    y = butter_filter_array(
+    y = butter_filter_array_uni(
         x,
         fs=fs,
         cutoff_hz=lpfreq,
