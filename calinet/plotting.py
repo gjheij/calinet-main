@@ -370,6 +370,8 @@ def plot_physio_with_events(
         subject: str,
         task_name: str,
         modality: str,
+        phys_base: str="physio",
+        session: Union[str, int]=None,
         root_path: Union[str, Path]="Z:\\CALINET2\\converted",
         ax: Optional[Any]=None,
         chan_idx: int=-1,
@@ -390,6 +392,12 @@ def plot_physio_with_events(
         Task name.
     modality : str
         Recording modality (e.g., ``"scr"``, ``"eye"``).
+    phys_base : str, default="physio"
+        Name of the physiology subdirectory (e.g., ``"physio"``,
+        ``"derivatives/physio"`` or another custom folder).
+    session : str or int or None, optional
+        Session identifier. If provided, data are searched under the
+        corresponding ``ses-<session>`` directory.
     root_path : str or pathlib.Path, default="Z:\\CALINET2\\converted"
         Root directory containing data.
     ax : matplotlib.axes.Axes or None, optional
@@ -420,12 +428,17 @@ def plot_physio_with_events(
 
     This function performs file I/O and modifies matplotlib state.
     """
-    
-    site_dir = os.path.join(root_path, site)
-    subject_dir = os.path.join(site_dir, subject)
-    physio_dir = os.path.join(subject_dir, "physio")
 
-    base_name = f"{subject}_task-{task_name}"
+    site_dir = os.path.join(root_path, site)
+
+    if session is None:
+        subject_dir = os.path.join(site_dir, subject)
+        base_name = f"{subject}_task-{task_name}"
+    else:
+        subject_dir = os.path.join(site_dir, subject, f"ses-{session}")
+        base_name = f"{subject}_ses-{session}_task-{task_name}"
+
+    physio_dir = os.path.join(subject_dir, phys_base)
 
     phys_file = os.path.join(
         physio_dir,
