@@ -387,14 +387,39 @@ def _find_task_events_file(
     task = entities.get("task")
 
     if sub is None or task is None:
-        logger.warning(f"Could not parse sub/task from {physio_file.name}")
+        logger.warning(
+            "Could not parse sub/task from %s",
+            physio_file.name,
+        )
         return None
 
-    candidate = physio_file.parent / f"sub-{sub}_task-{task}_events.tsv"
+    # Entities that may legitimately be shared by physio and events files.
+    shared_entities = (
+        "sub",
+        "ses",
+        "task",
+        "acq",
+        "run",
+    )
+
+    filename_parts = [
+        f"{key}-{entities[key]}"
+        for key in shared_entities
+        if key in entities
+    ]
+
+    candidate = physio_file.parent / (
+        "_".join(filename_parts) + "_events.tsv"
+    )
+
     if candidate.exists():
         return candidate
 
-    logger.warning(f"No task events file found for {physio_file.name}")
+    logger.warning(
+        "No task events file found for %s; expected %s",
+        physio_file.name,
+        candidate,
+    )
     return None
 
 
@@ -1477,7 +1502,8 @@ def peak_score(
         df,
         events,
         TR=1/sr,
-        interval=interval
+        interval=interval,
+        sampling_rate=10
     )
 
     df_epoch = res.df_epoch.copy()
@@ -1616,15 +1642,36 @@ def peak_score_lab(
     root_path = Path(root_path)
     proj_path = root_path / lab_name
     logger.info(f"Input path: {proj_path}")
-    subject_list = list(proj_path.glob('sub-*'))
+
+    subject_list = [
+        p for p in proj_path.glob("sub-*")
+        if not p.suffix == ".zip"
+    ]
+
     logger.info(f"Found {len(subject_list)} subjects")
 
     df_peaks = []
     df_epochs = []
     logger.info("Start peak-scoring")
+    
     for sub in subject_list:
-        phys_path = sub / 'physio'
-        scr_file = list(phys_path.glob(f"*task-{task_name}*{modality}_physio.tsv.gz"))[0]
+        scr_files = list(
+            sub.glob(f"**/physio/*task-{task_name}*{modality}_physio.tsv.gz")
+        )
+
+        if not scr_files:
+            raise FileNotFoundError(
+                f"No {modality} physio file found for {sub.name}, "
+                f"task-{task_name}."
+            )
+
+        if len(scr_files) > 1:
+            raise RuntimeError(
+                f"Multiple {modality} physio files found for {sub.name}, "
+                f"task-{task_name}: {scr_files}"
+            )
+
+        scr_file = scr_files[0]
         ev_file = _find_task_events_file(scr_file)
         json_file = cio.infer_json_sidecar(scr_file)
         logger.debug(f"SCR:\t{scr_file}")

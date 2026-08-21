@@ -216,6 +216,7 @@ def add_subject_title(
 def plot_modalities_per_subject(
         lab_name: str,
         subject: str,
+        session: Union[str, int]=None,
         root_path: Union[Path, str]="Z:\\CALINET2\\converted",
         task_names: List[str]=["acquisition", "extinction"],
         **kwargs: Any
@@ -229,6 +230,8 @@ def plot_modalities_per_subject(
         Dataset or lab name.
     subject : str
         Subject identifier.
+    session : str, int, optional
+        Session identifier.        
     root_path : pathlib.Path or str, default="Z:\\CALINET2\\converted"
         Root directory containing subject data.
     task_names : list of str or None, optional
@@ -255,22 +258,53 @@ def plot_modalities_per_subject(
     """
 
     root_path = Path(root_path)
-    subj_path = root_path / lab_name / subject / "physio"
+    subj_path = root_path / lab_name / subject
+    
+    if session is not None:
+        session_id = str(session)
 
-    # subject-level superset, only for ordering
-    available_mods = find_available_modalities(subj_path)
+        if not session_id.startswith("ses-"):
+            session_id = f"ses-{session_id}"
+
+        subj_path = subj_path / session_id
+        base_path = f"{subject}_{session_id}"
+
+    subj_path = subj_path / "physio"
+
+    # Filter using the same subject/session/task naming assumptions.
+    available_mods = find_available_modalities(
+        physio_dir=str(subj_path),
+        subject=subject,
+        session=session_id,
+    )
+
 
     # determine which modalities actually exist for each task
     task_mods = {}
+
     for task in task_names:
         mods_this_task = []
+
         for mod in available_mods:
-            phys_file = subj_path / f"{subject}_task-{task}_recording-{mod}_physio.tsv.gz"
+            phys_file = (
+                subj_path
+                / f"{base_path}_task-{task}"
+                f"_recording-{mod}_physio.tsv.gz"
+            )
+
             if phys_file.exists():
                 mods_this_task.append(mod)
             else:
-                logger.warning(f"Missing file for task='{task}', modality='{mod}': {phys_file}. Skipping this axis.")
-                
+                logger.warning(
+                    "Missing physio file for subject=%s, session=%s, "
+                    "task=%s, modality=%s: %s. Skipping axis.",
+                    subject,
+                    session_id,
+                    task,
+                    mod,
+                    phys_file,
+                )
+
         task_mods[task] = mods_this_task
 
     # size based on actual number of rows
@@ -317,20 +351,27 @@ def plot_modalities_per_subject(
                 "x_label": "time (s)",
                 "plot_alpha": 0.5,
                 "stim_types": ("CSpr", "CSpu", "CSm", "USp"),
-                "title": {"title": mod, "style": "italic"},
                 "y_dec": 2,
                 "legend": False
             }
 
             local_kwargs = kwargs.copy()
             for key, val in defs.items():
-                local_kwargs = update_kwargs(local_kwargs, key, val, force=True)
+                local_kwargs = update_kwargs(local_kwargs, key, val)
+
+            local_kwargs = update_kwargs(
+                local_kwargs,
+                "title",
+                {"title": mod, "style": "italic"},
+                force=True
+            )
 
             ax_out, stim_types = plot_physio_with_events(
                 lab_name,
                 subject,
                 task,
                 mod,
+                session=session_id,
                 ax=ax,
                 root_path=root_path,
                 **local_kwargs
@@ -377,6 +418,7 @@ def plot_physio_with_events(
         chan_idx: int=-1,
         stim_types: Tuple[str, ...]=("CSpr", "USp", "CSpu", "CSm", "USo", "USm"),
         legend: bool=True,
+        color_dict: dict=None,
         **kwargs: Any
     ) -> Tuple[Optional[Any], Tuple[str, ...]]:
     """
@@ -408,6 +450,14 @@ def plot_physio_with_events(
         Event types to include in the plot.
     legend : bool, default=True
         Whether to display a legend for plotted events.
+    color_dict : dict, optional
+        Color mapper for custom events. Defaults to 'stim_colors' in calinet.config, but can take the shape of:
+
+        {
+            "event1": "r",
+            "event2": "b"
+        }
+
     kwargs : dict of str to Any
         Additional plotting arguments forwarded to ``LazyLine``.
 
@@ -431,12 +481,17 @@ def plot_physio_with_events(
 
     site_dir = os.path.join(root_path, site)
 
-    if session is None:
-        subject_dir = os.path.join(site_dir, subject)
-        base_name = f"{subject}_task-{task_name}"
-    else:
-        subject_dir = os.path.join(site_dir, subject, f"ses-{session}")
-        base_name = f"{subject}_ses-{session}_task-{task_name}"
+    subject_dir = os.path.join(site_dir, subject)
+    base_name = f"{subject}_task-{task_name}"
+
+    if session is not None:
+        session = str(session)
+
+        if not session.startswith("ses-"):
+            session = f"ses-{session}"
+
+        subject_dir = os.path.join(site_dir, subject, session)
+        base_name = f"{subject}_{session}_task-{task_name}"
 
     physio_dir = os.path.join(subject_dir, phys_base)
 
@@ -457,9 +512,15 @@ def plot_physio_with_events(
     # skip missing physio file
     if not os.path.exists(phys_file):
         logger.warning(
-            f"Missing physio file for subject={subject}, task={task_name}, "
-            f"modality={modality}: {phys_file}. Skipping axis."
+            "Missing physio file for subject=%s, session=%s, "
+            "task=%s, modality=%s: %s. Skipping axis.",
+            subject,
+            session,
+            task_name,
+            modality,
+            phys_file,
         )
+
         return None, stim_types
 
     # skip missing event file
@@ -532,7 +593,10 @@ def plot_physio_with_events(
     ax = pl.axs
 
     logger.info("Add events")
-    for key, val in stim_colors.items():
+    if color_dict is None:
+        color_dict = stim_colors
+
+    for key, val in color_dict.items():
         if key in stim_types:
             ev_df = df_ev.loc[df_ev["event_type"] == key]
             for j, onset in enumerate(ev_df["onset"]):

@@ -671,8 +671,9 @@ def cleanup_logs(
         
 def find_available_modalities(
         physio_dir: str,
-        subject: Optional[str]=None,
-        task_name: Optional[str]=None
+        subject: Optional[str] = None,
+        session: Optional[str] = None,
+        task_name: Optional[str] = None
     ) -> List[str]:
     """
     Find available recording modalities in a physiology directory.
@@ -683,6 +684,8 @@ def find_available_modalities(
         Directory containing physiology files.
     subject : str or None, optional
         Optional subject filter (e.g., ``"sub-001"``).
+    session : str or None, optional
+        Optional session filter (e.g., ``"ses-01"``).
     task_name : str or None, optional
         Optional task filter (e.g., ``"acquisition"``).
 
@@ -699,24 +702,35 @@ def find_available_modalities(
     This function performs filesystem listing but does not modify files.
     """
 
-    modalities = set()
+    modalities: set[str] = set()
+
+    if session is not None and not session.startswith("ses-"):
+        session = f"ses-{session}"
 
     pattern = re.compile(
-        r'^(?P<subject>sub-[^_]+)_task-(?P<task>[^_]+)_recording-(?P<modality>[^_]+)_physio\.tsv\.gz$'
+        r"^(?P<subject>sub-[^_]+)"
+        r"(?:_(?P<session>ses-[^_]+))?"
+        r"_task-(?P<task>[^_]+)"
+        r"_recording-(?P<modality>[^_]+)"
+        r"_physio\.tsv\.gz$"
     )
 
-    for fname in os.listdir(physio_dir):
-        match = pattern.match(fname)
-        if not match:
+    for filename in os.listdir(physio_dir):
+        match = pattern.match(filename)
+
+        if match is None:
             continue
 
-        if subject is not None and match.group("subject") != subject:
+        if subject is not None and match["subject"] != subject:
             continue
 
-        if task_name is not None and match.group("task") != task_name:
+        if session is not None and match["session"] != session:
             continue
 
-        modalities.add(match.group("modality"))
+        if task_name is not None and match["task"] != task_name:
+            continue
+
+        modalities.add(match["modality"])
 
     return sorted(modalities)
 
